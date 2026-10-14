@@ -394,7 +394,7 @@ jobs:
             printf '%s\n' "- Image: \`$IMAGE\`"
             printf '%s\n' "- Tags: \`sha-$sha\` (plus \`latest\` on the default branch and the matching version tag)"
             printf '%s\n' "- Digest: \`$digest\`"
-            printf '%s\n' '- Architectures: `linux/amd64`, `linux/arm64`'
+            printf '%s\n' "- Architectures: \`linux/amd64\`, \`linux/arm64\`"
             printf '%s\n' "- Built at: \`$built_at\`"
             printf '%s\n' "- Commit: \`$sha\`"
             printf '%s\n' "- Actions run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
