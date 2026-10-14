@@ -37,8 +37,7 @@ jobs:
 
       - name: Check Go formatting
         run: |
-          files=$(find . -type f -name '*.go' -not -path './vendor/*')
-          unformatted=$(gofmt -l $files)
+          unformatted=$(find . -type f -name '*.go' -not -path './vendor/*' -print0 | xargs -0 -r gofmt -l)
           if [ -n "$unformatted" ]; then
             printf '%s\n' "$unformatted"
             exit 1
@@ -155,7 +154,18 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Run unit tests with mock providers
-        run: go test ./...
+        run: |
+          set -o pipefail
+          go test ./... 2>&1 | tee "$RUNNER_TEMP/go-tests.log" || {
+            python3 - "$RUNNER_TEMP/go-tests.log" <<'PY'
+          import pathlib, sys
+          output = pathlib.Path(sys.argv[1]).read_text(errors="replace")
+          tail = "\n".join(output.splitlines()[-100:])[-12000:]
+          escaped = tail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=Go test failure::{escaped}")
+          PY
+            exit 1
+          }
 
   build-amd64:
     name: Build and publish linux/amd64 layer

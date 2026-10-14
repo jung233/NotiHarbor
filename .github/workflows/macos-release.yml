@@ -12,7 +12,7 @@ on:
         type: boolean
 
 concurrency:
-  group: notiharbor-release-${{ github.ref }}
+  group: notiharbor-release-macos-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:

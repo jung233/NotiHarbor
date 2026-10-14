@@ -305,7 +305,7 @@ func validateSourceChannels(ctx context.Context, channelIDs []string, ownerUserI
 			query = query.Where("user_id = ?", ownerUserID)
 		}
 		var channel model.Channel
-		err := query.First(&channel).Error
+		err = query.First(&channel).Error
 		if err != nil {
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return errGatewayDataUnavailable

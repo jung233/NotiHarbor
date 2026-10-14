@@ -72,7 +72,7 @@ func submitLegacyGateway(ctx context.Context, user *model.User, message *model.M
 				return err
 			}
 		} // Older channels also use non-JSON Other formats.
-		_, err := service.SubmitLegacyTx(ctx, tx, message, gateway.EnqueueRequest{SourceID: sourceID, Title: message.Title, Content: message.Content, Priority: "normal", DeliveryPolicy: gateway.PolicyBroadcast, Metadata: metadata, Deliveries: []gateway.DeliverySpec{{ChannelID: channelID, ChannelName: configured.Name, ChannelType: configured.Type, Target: message.To, MaxAttempts: config.MaxAttempts, RetryBackoffSeconds: config.RetryBackoffSeconds}}})
+		_, err = service.SubmitLegacyTx(ctx, tx, message, gateway.EnqueueRequest{SourceID: sourceID, Title: message.Title, Content: message.Content, Priority: "normal", DeliveryPolicy: gateway.PolicyBroadcast, Metadata: metadata, Deliveries: []gateway.DeliverySpec{{ChannelID: channelID, ChannelName: configured.Name, ChannelType: configured.Type, Target: message.To, MaxAttempts: config.MaxAttempts, RetryBackoffSeconds: config.RetryBackoffSeconds}}})
 		return err
 	})
 }
