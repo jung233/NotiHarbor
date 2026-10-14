@@ -1,7 +1,9 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
+	"gorm.io/gorm"
 	"message-pusher/common"
 )
 
@@ -22,6 +24,7 @@ const (
 	TypeLarkApp           = "lark_app"
 	TypeCustom            = "custom"
 	TypeTencentAlarm      = "tencent_alarm"
+	TypeQQBotV2           = "qqbot_v2"
 )
 
 type Channel struct {
@@ -38,6 +41,64 @@ type Channel struct {
 	Other       string  `json:"other"`
 	CreatedTime int64   `json:"created_time" gorm:"bigint"`
 	Token       *string `json:"token" gorm:"token"`
+}
+
+// Secrets are encrypted on new writes; existing plaintext remains readable.
+func (channel *Channel) BeforeSave(tx *gorm.DB) error {
+	var err error
+	channel.Secret, err = common.EncryptCredential(channel.Secret)
+	if err != nil {
+		return err
+	}
+	if channel.Token != nil {
+		value, err := common.EncryptCredential(*channel.Token)
+		if err != nil {
+			return err
+		}
+		channel.Token = &value
+	}
+	return nil
+}
+
+func (channel *Channel) AfterFind(tx *gorm.DB) error {
+	var err error
+	channel.Secret, err = common.DecryptCredential(channel.Secret)
+	if err != nil {
+		return err
+	}
+	if channel.Token != nil {
+		value, err := common.DecryptCredential(*channel.Token)
+		if err != nil {
+			return err
+		}
+		channel.Token = &value
+	}
+	return nil
+}
+
+func (channel *Channel) AfterSave(tx *gorm.DB) error { return channel.AfterFind(tx) }
+
+func (channel Channel) MarshalJSON() ([]byte, error) {
+	type publicChannel Channel
+	channel.Secret = ""
+	channel.Token = nil
+	return json.Marshal(publicChannel(channel))
+}
+
+// Ciphertexts have random nonces, so shared credentials cannot be compared in SQL.
+func ChannelCredentialShared(appID, channelType, secret string) bool {
+	var channels []Channel
+	if err := DB.Where("app_id = ? AND type = ?", appID, channelType).Find(&channels).Error; err != nil {
+		common.SysError("failed to inspect shared channel credentials")
+		return true // Do not evict another channel's token on an uncertain lookup.
+	}
+	count := 0
+	for _, configured := range channels {
+		if configured.Secret == secret {
+			count++
+		}
+	}
+	return count > 1
 }
 
 type BriefChannel struct {

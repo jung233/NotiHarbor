@@ -65,4 +65,5 @@ export const CHANNEL_OPTIONS = [
     value: 'none',
     color: '#808080',
   },
+  { key: 'qqbot_v2', text: 'QQ 官方 Bot v2', value: 'qqbot_v2', color: '#12b7f5' },
 ];

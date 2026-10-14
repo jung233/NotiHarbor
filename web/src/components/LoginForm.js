@@ -12,7 +12,7 @@ import {
 } from 'semantic-ui-react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { UserContext } from '../context/User';
-import { API, showError, showSuccess } from '../helpers';
+import { API, openPage, showError, showSuccess } from '../helpers';
 
 const LoginForm = () => {
   const [inputs, setInputs] = useState({
@@ -42,9 +42,10 @@ const LoginForm = () => {
   const [showWeChatLoginModal, setShowWeChatLoginModal] = useState(false);
 
   const onGitHubOAuthClicked = () => {
-    window.open(
-      `https://github.com/login/oauth/authorize?client_id=${status.github_client_id}&scope=user:email`
-    );
+    const authUrl = new URL('https://github.com/login/oauth/authorize');
+    authUrl.searchParams.set('client_id', status.github_client_id || '');
+    authUrl.searchParams.set('scope', 'user:email');
+    openPage(authUrl.href);
   };
 
   const onWeChatLoginClicked = () => {

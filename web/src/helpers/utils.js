@@ -5,15 +5,25 @@ import { API } from './api';
 export function isAdmin() {
   let user = localStorage.getItem('user');
   if (!user) return false;
-  user = JSON.parse(user);
-  return user.role >= 10;
+  try {
+    user = JSON.parse(user);
+    return user.role >= 10;
+  } catch (error) {
+    localStorage.removeItem('user');
+    return false;
+  }
 }
 
 export function isRoot() {
   let user = localStorage.getItem('user');
   if (!user) return false;
-  user = JSON.parse(user);
-  return user.role >= 100;
+  try {
+    user = JSON.parse(user);
+    return user.role >= 100;
+  } catch (error) {
+    localStorage.removeItem('user');
+    return false;
+  }
 }
 
 export async function copy(text) {
@@ -78,10 +88,9 @@ export function showError(error) {
   console.error(error);
   if (error.message) {
     if (error.name === 'AxiosError') {
-      switch (error.response.status) {
+      switch (error.response?.status) {
         case 401:
-          // toast.error('错误：未登录或登录已过期，请重新登录！', showErrorOptions);
-          window.location.href = '/login?expired=true';
+          toast.error('登录已失效，请重新登录。', showErrorOptions);
           break;
         case 429:
           toast.error('错误：请求次数过多，请稍后再试！', showErrorOptions);
@@ -120,7 +129,79 @@ export function showNotice(message) {
 }
 
 export function openPage(url) {
-  window.open(url);
+  try {
+    if (!String(url || '').trim()) return;
+    const parsed = new URL(url, window.location.origin);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      window.open(parsed.href, '_blank', 'noopener,noreferrer');
+    }
+  } catch (error) {
+    console.warn('Ignored an invalid link', error);
+  }
+}
+
+export function safeHttpURL(value) {
+  try {
+    if (!String(value || '').trim()) return '';
+    const parsed = new URL(value, window.location.origin);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+      ? parsed.href
+      : '';
+  } catch (error) {
+    return '';
+  }
+}
+
+const SAFE_HTML_TAGS = new Set([
+  'A', 'B', 'BLOCKQUOTE', 'BR', 'CODE', 'DEL', 'EM', 'H1', 'H2', 'H3',
+  'H4', 'H5', 'H6', 'HR', 'I', 'LI', 'OL', 'P', 'PRE', 'S', 'STRONG',
+  'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'U', 'UL',
+]);
+const DROP_HTML_TAGS = new Set([
+  'IFRAME', 'OBJECT', 'SCRIPT', 'STYLE', 'SVG', 'MATH', 'TEMPLATE',
+]);
+
+export function sanitizeHTML(value) {
+  const parser = new DOMParser();
+  const parsedDocument = parser.parseFromString(String(value || ''), 'text/html');
+  const cleanNode = (node) => {
+    Array.from(node.children).forEach((child) => {
+      const tagName = child.tagName.toUpperCase();
+      if (DROP_HTML_TAGS.has(tagName)) {
+        child.remove();
+        return;
+      }
+      cleanNode(child);
+      if (!SAFE_HTML_TAGS.has(tagName)) {
+        child.replaceWith(...Array.from(child.childNodes));
+        return;
+      }
+      Array.from(child.attributes).forEach((attribute) => {
+        if (tagName === 'A' && attribute.name === 'href') {
+          try {
+            const link = new URL(attribute.value, window.location.origin);
+            if (!['http:', 'https:', 'mailto:'].includes(link.protocol)) {
+              child.removeAttribute(attribute.name);
+            } else {
+              child.setAttribute(attribute.name, link.href);
+            }
+          } catch (error) {
+            child.removeAttribute(attribute.name);
+          }
+          return;
+        }
+        if (
+          ['TD', 'TH'].includes(tagName) &&
+          ['colspan', 'rowspan'].includes(attribute.name)
+        ) {
+          return;
+        }
+        child.removeAttribute(attribute.name);
+      });
+    });
+  };
+  cleanNode(parsedDocument.body);
+  return parsedDocument.body.innerHTML;
 }
 
 export function removeTrailingSlash(url) {
@@ -172,12 +253,12 @@ export async function testChannel(username, token, channel) {
   let res = await API.post(`/push/${username}/`, {
     token,
     channel,
-    title: '消息推送服务',
+    title: 'NotiHarbor 讯港',
     description:
       channel === ''
         ? '消息推送通道测试成功'
         : `消息推送通道 ${channel} 测试成功`,
-    content: '欢迎使用消息推送服务，这是一条测试消息。',
+    content: '欢迎使用 NotiHarbor 讯港，这是一条测试消息。',
   });
   const { success, message } = res.data;
   if (success) {

@@ -19,6 +19,12 @@ const headerButtons = [
     icon: 'mail',
   },
   {
+    name: '网关',
+    to: '/gateway',
+    icon: 'dashboard',
+    admin: true,
+  },
+  {
     name: '编辑',
     to: '/editor',
     icon: 'edit',
@@ -59,11 +65,16 @@ const Header = () => {
 
   async function logout() {
     setShowSidebar(false);
-    await API.get('/api/user/logout');
-    showSuccess('注销成功!');
-    userDispatch({ type: 'logout' });
-    localStorage.removeItem('user');
-    navigate('/login');
+    try {
+      const response = await API.post('/api/user/logout', {});
+      if (response.data?.success) showSuccess('注销成功!');
+    } catch (error) {
+      // The shared API interceptor reports transport errors.
+    } finally {
+      userDispatch({ type: 'logout' });
+      localStorage.removeItem('user');
+      navigate('/login');
+    }
   }
 
   const toggleSidebar = () => {
@@ -119,7 +130,7 @@ const Header = () => {
                 style={{ marginRight: '0.75em' }}
               />
               <div style={{ fontSize: '20px' }}>
-                <b>消息推送服务</b>
+                <b>NotiHarbor 讯港</b>
               </div>
             </Menu.Item>
             <Menu.Menu position='right'>
@@ -173,7 +184,7 @@ const Header = () => {
           <Menu.Item as={Link} to='/' className={'hide-on-mobile'}>
             <img src='/logo.png' alt='logo' style={{ marginRight: '0.75em' }} />
             <div style={{ fontSize: '20px' }}>
-              <b>消息推送服务</b>
+              <b>NotiHarbor 讯港</b>
             </div>
           </Menu.Item>
           {renderButtons(false)}

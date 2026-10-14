@@ -1,0 +1,360 @@
+name: NotiHarbor CI and multi-architecture container
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notiharbor-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  static-checks:
+    name: Static checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: go.sum
+
+      - name: Verify Go dependencies
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Check Go formatting
+        run: |
+          files=$(find . -type f -name '*.go' -not -path './vendor/*')
+          unformatted=$(gofmt -l $files)
+          if [ -n "$unformatted" ]; then
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install locked frontend dependencies
+        working-directory: web
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run ESLint
+        working-directory: web
+        run: ./node_modules/.bin/eslint src --ext .js
+
+      - name: Check TypeScript when configured
+        working-directory: web
+        run: |
+          if [ -f tsconfig.json ]; then
+            ./node_modules/.bin/tsc --noEmit
+          else
+            echo "No TypeScript project is configured."
+          fi
+
+      - name: Build frontend assets for Go embed
+        working-directory: web
+        env:
+          CI: "false"
+          PUBLIC_URL: "/"
+        run: npm run build
+
+      - name: Run Go static analysis
+        env:
+          CGO_ENABLED: "1"
+        run: go vet ./...
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: error
+
+      - name: Validate GitHub Actions workflows
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+
+  remote-tests:
+    name: Remote mock tests
+    runs-on: ubuntu-24.04
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: message_pusher_test
+          MYSQL_USER: message_pusher
+          MYSQL_PASSWORD: ci-test-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI_REDIS_URL: redis://localhost:6379/0
+      CI_MYSQL_DSN: message_pusher:ci-test-password@tcp(127.0.0.1:3306)/message_pusher_test?charset=utf8mb4&parseTime=True&loc=UTC
+      CGO_ENABLED: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run frontend regression tests
+        working-directory: web
+        run: CI=true npm test -- --watchAll=false
+
+      - name: Build frontend assets for Go embed
+        working-directory: web
+        env:
+          CI: "false"
+          PUBLIC_URL: "/"
+        run: npm run build
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: go.sum
+
+      - name: Run unit tests with mock providers
+        run: go test ./...
+
+  build-amd64:
+    name: Build and publish linux/amd64 layer
+    needs:
+      - static-checks
+      - remote-tests
+    if: github.event_name == 'push' && (github.ref_type == 'tag' || github.ref_name == github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Resolve GHCR image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR for publishable refs
+        if: github.event_name == 'push' && (github.ref_type == 'tag' || github.ref_name == github.event.repository.default_branch)
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build on native amd64
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' && (github.ref_type == 'tag' || github.ref_name == github.event.repository.default_branch) }}
+          tags: ${{ steps.image.outputs.name }}:build-${{ github.sha }}-amd64
+          build-args: BUILD_VERSION=${{ github.ref_name }}
+          cache-from: type=gha,scope=linux-amd64
+          cache-to: type=gha,scope=linux-amd64,mode=max
+
+  build-arm64:
+    name: Build and publish linux/arm64 layer
+    needs:
+      - static-checks
+      - remote-tests
+    if: github.event_name == 'push' && (github.ref_type == 'tag' || github.ref_name == github.event.repository.default_branch)
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Resolve GHCR image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR for publishable refs
+        if: github.event_name == 'push' && (github.ref_type == 'tag' || github.ref_name == github.event.repository.default_branch)
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build on native arm64
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: ${{ github.event_name == 'push' && (github.ref_type == 'tag' || github.ref_name == github.event.repository.default_branch) }}
+          tags: ${{ steps.image.outputs.name }}:build-${{ github.sha }}-arm64
+          build-args: BUILD_VERSION=${{ github.ref_name }}
+          cache-from: type=gha,scope=linux-arm64
+          cache-to: type=gha,scope=linux-arm64,mode=max
+
+  verify-amd64:
+    name: Verify linux/amd64 image without registry write access
+    needs:
+      - static-checks
+      - remote-tests
+    if: github.event_name != 'push' || (github.ref_type != 'tag' && github.ref_name != github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build linux/amd64 without publishing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: notiharbor:verify-${{ github.sha }}-amd64
+          build-args: BUILD_VERSION=${{ github.ref_name }}
+          cache-from: type=gha,scope=verify-linux-amd64
+          cache-to: type=gha,scope=verify-linux-amd64,mode=max
+
+  verify-arm64:
+    name: Verify linux/arm64 image without registry write access
+    needs:
+      - static-checks
+      - remote-tests
+    if: github.event_name != 'push' || (github.ref_type != 'tag' && github.ref_name != github.event.repository.default_branch)
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build linux/arm64 without publishing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: false
+          tags: notiharbor:verify-${{ github.sha }}-arm64
+          build-args: BUILD_VERSION=${{ github.ref_name }}
+          cache-from: type=gha,scope=verify-linux-arm64
+          cache-to: type=gha,scope=verify-linux-arm64,mode=max
+
+  publish-manifest:
+    name: Publish multi-architecture manifest
+    needs:
+      - build-amd64
+      - build-arm64
+      - static-checks
+      - remote-tests
+    if: github.event_name == 'push' && (github.ref_type == 'tag' || github.ref_name == github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create the manifest and publish final tags
+        id: manifest
+        env:
+          IMAGE: ${{ needs.build-amd64.outputs.image }}
+          AMD64_DIGEST: ${{ needs.build-amd64.outputs.digest }}
+          ARM64_DIGEST: ${{ needs.build-arm64.outputs.digest }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          sha="$GITHUB_SHA"
+          amd64_image="$IMAGE@$AMD64_DIGEST"
+          arm64_image="$IMAGE@$ARM64_DIGEST"
+          tags=(--tag "$IMAGE:sha-$sha")
+          if [ "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH" ]; then
+            tags+=(--tag "$IMAGE:latest")
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/v* && "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            tags+=(--tag "$IMAGE:$GITHUB_REF_NAME")
+          fi
+          docker buildx imagetools create "${tags[@]}" "$amd64_image" "$arm64_image"
+          digest=$(docker buildx imagetools inspect "$IMAGE:sha-$sha" | awk "/^Digest: / {print \$2; exit}")
+          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          {
+            printf '%s\n' '### Published multi-architecture image' ''
+            printf '%s\n' "- Image: \`$IMAGE\`"
+            printf '%s\n' "- Tags: \`sha-$sha\` (plus \`latest\` on the default branch and the matching version tag)"
+            printf '%s\n' "- Digest: \`$digest\`"
+            printf '%s\n' '- Architectures: `linux/amd64`, `linux/arm64`'
+            printf '%s\n' "- Built at: \`$built_at\`"
+            printf '%s\n' "- Commit: \`$sha\`"
+            printf '%s\n' "- Actions run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"message-pusher/channel"
 	"message-pusher/common"
+	"message-pusher/middleware"
 	"message-pusher/model"
 	"net/http"
 	"strconv"
@@ -62,6 +63,7 @@ func Login(c *gin.Context) {
 // setup session & cookies and then return user info
 func setupLogin(user *model.User, c *gin.Context) {
 	session := sessions.Default(c)
+	session.Clear()
 	session.Set("id", user.Id)
 	session.Set("username", user.Username)
 	session.Set("role", user.Role)
@@ -91,7 +93,14 @@ func setupLogin(user *model.User, c *gin.Context) {
 func Logout(c *gin.Context) {
 	session := sessions.Default(c)
 	session.Clear()
-	err := session.Save()
+	options, err := middleware.SessionOptions()
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+	options.MaxAge = -1
+	session.Options(options)
+	err = session.Save()
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"message": err.Error(),

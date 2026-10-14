@@ -1,11 +1,14 @@
 package controller
 
 import (
+	"encoding/json"
+	"gorm.io/gorm"
 	"message-pusher/channel"
 	"message-pusher/common"
 	"message-pusher/model"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -137,7 +140,12 @@ func AddChannel(c *gin.Context) {
 		CreatedTime: common.GetTimestamp(),
 		Token:       channel_.Token,
 	}
-	err = cleanChannel.Insert()
+	err = model.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&cleanChannel).Error; err != nil {
+			return err
+		}
+		return channelMutationAudit(tx, c, &cleanChannel, "channel.create")
+	})
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -156,7 +164,15 @@ func AddChannel(c *gin.Context) {
 func DeleteChannel(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	userId := c.GetInt("id")
-	channel_, err := model.DeleteChannelById(id, userId)
+	channel_, err := model.GetChannelById(id, userId, true)
+	if err == nil {
+		err = model.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Where("id = ? AND user_id = ?", id, userId).Delete(&model.Channel{}).Error; err != nil {
+				return err
+			}
+			return channelMutationAudit(tx, c, channel_, "channel.delete")
+		})
+	}
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -207,9 +223,16 @@ func UpdateChannel(c *gin.Context) {
 		cleanChannel.AccountId = channel_.AccountId
 		cleanChannel.URL = channel_.URL
 		cleanChannel.Other = channel_.Other
-		cleanChannel.Token = channel_.Token
+		if channel_.Token != nil && *channel_.Token != "" {
+			cleanChannel.Token = channel_.Token
+		}
 	}
-	err = cleanChannel.Update()
+	err = model.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&cleanChannel).Select("type", "name", "description", "secret", "app_id", "account_id", "url", "other", "status", "token").Updates(&cleanChannel).Error; err != nil {
+			return err
+		}
+		return channelMutationAudit(tx, c, &cleanChannel, "channel.update")
+	})
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -224,4 +247,12 @@ func UpdateChannel(c *gin.Context) {
 		"data":    cleanChannel,
 	})
 	return
+}
+
+func channelMutationAudit(tx *gorm.DB, c *gin.Context, configured *model.Channel, action string) error {
+	details, err := json.Marshal(map[string]interface{}{"channel_type": configured.Type, "status": configured.Status})
+	if err != nil {
+		return err
+	}
+	return tx.Create(&model.AuditLog{Id: common.GetUUID(), ActorType: "user", ActorID: strconv.Itoa(c.GetInt("id")), Action: action, ResourceType: "channel", ResourceID: strconv.Itoa(configured.Id), RequestID: c.GetString("request_id"), DetailsJSON: string(details), CreatedAt: time.Now().UTC()}).Error
 }

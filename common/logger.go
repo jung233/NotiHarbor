@@ -1,12 +1,15 @@
 package common
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -28,17 +31,36 @@ func SetupGinLog() {
 }
 
 func SysLog(s string) {
-	t := time.Now()
-	_, _ = fmt.Fprintf(gin.DefaultWriter, "[SYS] %v | %s \n", t.Format("2006/01/02 - 15:04:05"), s)
+	writeSystemLog("info", s, gin.DefaultWriter)
 }
 
 func SysError(s string) {
-	t := time.Now()
-	_, _ = fmt.Fprintf(gin.DefaultErrorWriter, "[SYS] %v | %s \n", t.Format("2006/01/02 - 15:04:05"), s)
+	writeSystemLog("error", s, gin.DefaultErrorWriter)
 }
 
 func FatalLog(v ...any) {
-	t := time.Now()
-	_, _ = fmt.Fprintf(gin.DefaultErrorWriter, "[FATAL] %v | %v \n", t.Format("2006/01/02 - 15:04:05"), v)
+	writeSystemLog("fatal", fmt.Sprint(v...), gin.DefaultErrorWriter)
 	os.Exit(1)
+}
+
+var sensitiveLogPattern = regexp.MustCompile(`(?i)(authorization|cookie|password|client_secret|clientsecret|access_token|token|api_key|session_secret)([\s"':=]+)([^\s,;&"}]+)`)
+var authorizationLogPattern = regexp.MustCompile(`(?i)(authorization[\s"':=]+)(?:(?:bearer|qqbot|bot)\s+)?[^\s,;"}]+`)
+var cookieLogPattern = regexp.MustCompile(`(?i)((?:set-cookie|cookie)[\s"':=]+)[^\r\n]+`)
+
+func RedactLog(message string) string {
+	for _, name := range []string{"SESSION_SECRET", "ENCRYPTION_KEY", "INITIAL_ADMIN_PASSWORD", "SQL_DSN", "REDIS_CONN_STRING"} {
+		if value := os.Getenv(name); value != "" {
+			message = strings.ReplaceAll(message, value, "[REDACTED]")
+		}
+	}
+	message = authorizationLogPattern.ReplaceAllString(message, "${1}[REDACTED]")
+	message = cookieLogPattern.ReplaceAllString(message, "${1}[REDACTED]")
+	return sensitiveLogPattern.ReplaceAllString(message, "${1}${2}[REDACTED]")
+}
+
+func writeSystemLog(level, message string, writer io.Writer) {
+	entry := map[string]string{"type": "system", "level": level, "time": time.Now().UTC().Format(time.RFC3339Nano), "message": RedactLog(message)}
+	if encoded, err := json.Marshal(entry); err == nil {
+		_, _ = fmt.Fprintln(writer, string(encoded))
+	}
 }

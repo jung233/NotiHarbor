@@ -1,0 +1,870 @@
+openapi: 3.1.0
+info:
+  title: NotiHarbor Gateway API
+  version: 1.0.0
+  description: >
+    Source-scoped notification API and session-authenticated administration routes.
+    API keys are accepted only on non-admin upstream routes. Session writes also
+    require a same-origin Origin or Referer header.
+servers:
+  - url: /
+security: []
+tags:
+  - name: Operations
+  - name: Upstream
+  - name: Administration
+  - name: QQBot callback
+paths:
+  /healthz:
+    get:
+      tags: [Operations]
+      summary: Process liveness
+      responses:
+        "200":
+          description: Process is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ok }
+  /readyz:
+    get:
+      tags: [Operations]
+      summary: Gateway readiness
+      responses:
+        "200":
+          description: Database and Redis are reachable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ready }
+        "503":
+          description: Gateway, database, or Redis is unavailable
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, message]
+                properties:
+                  status: { type: string, const: not_ready }
+                  message: { type: string }
+  /api/v1/qqbot/callback:
+    post:
+      tags: [QQBot callback]
+      summary: Receive a QQ Bot v2 callback
+      description: Resolves the enabled bot by X-Bot-Appid and validates the signature over the raw request body.
+      parameters:
+        - name: X-Bot-Appid
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Signature-Timestamp
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Signature-Ed25519
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Callback acknowledged or URL verification answered
+        "403":
+          description: Unknown bot or invalid signature
+        "503":
+          description: Callback persistence failed
+  /api/v1/notifications:
+    post:
+      tags: [Upstream]
+      summary: Create an idempotent notification
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationRequest"
+      responses:
+        "202":
+          description: Notification persisted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "200":
+          description: Idempotent replay of the original notification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "409":
+          $ref: "#/components/responses/Error"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+    get:
+      tags: [Upstream]
+      summary: List notifications visible to the API key source
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/SourceId"
+        - $ref: "#/components/parameters/Status"
+        - $ref: "#/components/parameters/ChannelId"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+  /api/v1/notifications/{id}:
+    parameters:
+      - $ref: "#/components/parameters/NotificationId"
+    get:
+      tags: [Upstream]
+      summary: Get a notification and its deliveries
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/notifications/{id}/deliveries:
+    parameters:
+      - $ref: "#/components/parameters/NotificationId"
+    get:
+      tags: [Upstream]
+      summary: List notification deliveries
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/notifications/{id}/deliveries/{deliveryID}/attempts:
+    parameters:
+      - $ref: "#/components/parameters/NotificationId"
+      - name: deliveryID
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/Page"
+      - $ref: "#/components/parameters/PageSize"
+    get:
+      tags: [Upstream]
+      summary: List delivery attempts
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/notifications/{id}/retry:
+    post:
+      tags: [Upstream]
+      summary: Request a retry
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/notifications/batch/retry:
+    post:
+      tags: [Upstream]
+      summary: Retry up to 100 notifications
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: string }
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "207":
+          description: Some notification retries failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/notifications/{id}/cancel:
+    post:
+      tags: [Upstream]
+      summary: Cancel a notification
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/notifications/{id}/resend:
+    post:
+      tags: [Upstream]
+      summary: Create a new notification from an existing notification
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "202":
+          $ref: "#/components/responses/Success"
+  /api/v1/channels:
+    get:
+      tags: [Upstream]
+      summary: List enabled channels authorized for this source
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/channels/{channelID}/test:
+    post:
+      tags: [Upstream]
+      summary: Send an audited test message
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: channelID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TestRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "403":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+  /api/v1/logs:
+    get:
+      tags: [Upstream]
+      summary: List delivery logs for this source
+      description: API keys are restricted to their bound source; source_id is optional for a key and must match when provided.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/NotificationIdQuery"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/dashboard:
+    get:
+      tags: [Administration]
+      summary: Read dashboard metrics
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/notifications:
+    get:
+      tags: [Administration]
+      summary: List notifications visible to the signed-in user
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/SourceId"
+        - $ref: "#/components/parameters/Status"
+        - $ref: "#/components/parameters/ChannelId"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/notifications/{id}:
+    parameters:
+      - $ref: "#/components/parameters/NotificationId"
+    get:
+      tags: [Administration]
+      summary: Get a notification and its deliveries
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/notifications/{id}/deliveries:
+    parameters:
+      - $ref: "#/components/parameters/NotificationId"
+    get:
+      tags: [Administration]
+      summary: List notification deliveries
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/notifications/{id}/deliveries/{deliveryID}/attempts:
+    parameters:
+      - $ref: "#/components/parameters/NotificationId"
+      - name: deliveryID
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/Page"
+      - $ref: "#/components/parameters/PageSize"
+    get:
+      tags: [Administration]
+      summary: List delivery attempts
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/notifications/{id}/retry:
+    post:
+      tags: [Administration]
+      summary: Request a retry
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/notifications/{id}/cancel:
+    post:
+      tags: [Administration]
+      summary: Cancel a notification
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/notifications/{id}/resend:
+    post:
+      tags: [Administration]
+      summary: Create a new notification from an existing notification
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/NotificationId"
+      responses:
+        "202":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/notifications/batch/retry:
+    post:
+      tags: [Administration]
+      summary: Retry up to 100 notifications
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: string }
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+        "207":
+          description: Some notification retries failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Envelope"
+  /api/v1/admin/channels:
+    get:
+      tags: [Administration]
+      summary: List enabled channels
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/channels/{channelID}/test:
+    post:
+      tags: [Administration]
+      summary: Send an audited test message
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: channelID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TestRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/logs:
+    get:
+      tags: [Administration]
+      summary: List delivery logs
+      description: Non-root session users must provide source_id to scope the log query.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/SourceId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/audit-logs:
+    get:
+      tags: [Administration]
+      summary: List administrative audit records
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/SourceId"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/sources:
+    get:
+      tags: [Administration]
+      summary: List sources
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [Administration]
+      summary: Create a source
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/Success"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/sources/{sourceID}:
+    parameters:
+      - name: sourceID
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Administration]
+      summary: Get a source
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    patch:
+      tags: [Administration]
+      summary: Update source settings
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourcePatch"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    delete:
+      tags: [Administration]
+      summary: Delete a source
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/sources/{sourceID}/api-keys:
+    parameters:
+      - name: sourceID
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Administration]
+      summary: List API keys without their plaintext values
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [Administration]
+      summary: Create an API key
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/APIKeyRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/sources/{sourceID}/api-keys/{keyID}/rotate:
+    post:
+      tags: [Administration]
+      summary: Rotate an API key
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: sourceID
+          in: path
+          required: true
+          schema: { type: string }
+        - name: keyID
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/APIKeyRotationRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/sources/{sourceID}/api-keys/{keyID}:
+    delete:
+      tags: [Administration]
+      summary: Revoke an API key
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: sourceID
+          in: path
+          required: true
+          schema: { type: string }
+        - name: keyID
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/sources/{sourceID}/targets:
+    parameters:
+      - name: sourceID
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Administration]
+      summary: List source targets
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    post:
+      tags: [Administration]
+      summary: Create a source target
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TargetRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+  /api/v1/admin/sources/{sourceID}/targets/{targetID}:
+    parameters:
+      - name: sourceID
+        in: path
+        required: true
+        schema: { type: string }
+      - name: targetID
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [Administration]
+      summary: Update a source target
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TargetPatch"
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+    delete:
+      tags: [Administration]
+      summary: Delete a source target
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Success"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Source-scoped API key. Required scope depends on the operation.
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Browser session cookie. Mutating requests also require a matching Origin or Referer.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema: { type: string, maxLength: 191 }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    SourceId:
+      name: source_id
+      in: query
+      schema: { type: string }
+    Status:
+      name: status
+      in: query
+      schema: { type: string }
+    ChannelId:
+      name: channel_id
+      in: query
+      schema: { type: string }
+    From:
+      name: from
+      in: query
+      schema: { type: string, format: date-time }
+    To:
+      name: to
+      in: query
+      schema: { type: string, format: date-time }
+    NotificationId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    NotificationIdQuery:
+      name: notification_id
+      in: query
+      schema: { type: string }
+  responses:
+    Success:
+      description: Request succeeded
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Envelope"
+    Error:
+      description: Request failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+  schemas:
+    Envelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: { type: boolean, const: true }
+        message: { type: string }
+        data: {}
+    ErrorEnvelope:
+      type: object
+      required: [success, message]
+      properties:
+        success: { type: boolean, const: false }
+        message: { type: string }
+    NotificationRequest:
+      type: object
+      additionalProperties: false
+      required: [title, content, channels]
+      properties:
+        title: { type: string, maxLength: 512 }
+        content: { type: string, maxLength: 1048576, description: Maximum UTF-8 payload size is 1 MiB; the server enforces the byte limit. }
+        priority: { type: string, default: normal }
+        message_type: { type: string, enum: [text, markdown] }
+        channels:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items: { type: string }
+        targets:
+          type: object
+          additionalProperties: { type: string }
+        delivery_policy: { type: string, enum: [broadcast, fallback], default: broadcast }
+        idempotency_key: { type: string, maxLength: 191 }
+        metadata: { type: object, additionalProperties: true }
+    TestRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        source_id: { type: string, description: Optional for an API key; it is bound to that key's source. }
+        target_id: { type: string }
+        title: { type: string }
+        content: { type: string, maxLength: 1048576, description: Maximum UTF-8 payload size is 1 MiB; the server enforces the byte limit. }
+        message_type: { type: string, enum: [text, markdown], default: text }
+        is_test: { type: boolean }
+    SourceRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 191 }
+        description: { type: string }
+        status: { type: string, enum: [active, disabled] }
+        rate_limit_per_minute: { type: integer, minimum: 0 }
+        allowed_channel_ids:
+          type: array
+          maxItems: 128
+          items: { type: string, pattern: "^[1-9][0-9]*$" }
+    SourcePatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, maxLength: 191 }
+        description: { type: string }
+        status: { type: string, enum: [active, disabled] }
+        rate_limit_per_minute: { type: integer, minimum: 0 }
+        allowed_channel_ids:
+          type: array
+          maxItems: 128
+          items: { type: string, pattern: "^[1-9][0-9]*$" }
+    APIKeyRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 191 }
+        scopes:
+          type: array
+          items:
+            type: string
+            enum:
+              - notifications:write
+              - notifications:read
+              - notifications:retry
+              - notifications:cancel
+              - channels:read
+              - channels:test
+              - logs:read
+        expires_at: { type: string, format: date-time }
+    APIKeyRotationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        scopes:
+          type: array
+          items:
+            type: string
+            enum:
+              - notifications:write
+              - notifications:read
+              - notifications:retry
+              - notifications:cancel
+              - channels:read
+              - channels:test
+              - logs:read
+        expires_at: { type: string, format: date-time }
+    TargetRequest:
+      type: object
+      required: [channel_id, target_type, external_id]
+      properties:
+        channel_id: { type: string }
+        target_type: { type: string }
+        external_id: { type: string }
+        name: { type: string }
+        source: { type: string }
+        status: { type: string, enum: [active, disabled] }
+        last_interaction_at: { type: string, format: date-time }
+        is_default: { type: boolean }
+    TargetPatch:
+      type: object
+      properties:
+        channel_id: { type: string }
+        target_type: { type: string }
+        external_id: { type: string }
+        name: { type: string }
+        source: { type: string }
+        status: { type: string, enum: [active, disabled] }
+        last_interaction_at: { type: string, format: date-time }
+        is_default: { type: boolean }

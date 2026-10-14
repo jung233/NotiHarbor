@@ -1,12 +1,15 @@
 package controller
 
 import (
+	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"message-pusher/channel"
 	"message-pusher/common"
+	"message-pusher/gateway"
 	"message-pusher/model"
 	"net/http"
 	"strconv"
@@ -120,17 +123,17 @@ func pushMessageHelper(c *gin.Context, message *model.Message) {
 }
 
 func authMessage(messageToken string, userToken string, channelToken *string) bool {
-	if userToken != "" {
-		if messageToken == userToken {
-			return true
-		}
+	channelSecret := ""
+	if channelToken != nil {
+		channelSecret = *channelToken
 	}
-	if channelToken != nil && *channelToken != "" {
-		if messageToken != *channelToken {
-			return false
-		}
+	if userToken == "" && channelSecret == "" {
+		return true
 	}
-	return true
+	if messageToken == "" {
+		return false
+	}
+	return (userToken != "" && subtle.ConstantTimeCompare([]byte(messageToken), []byte(userToken)) == 1) || (channelSecret != "" && subtle.ConstantTimeCompare([]byte(messageToken), []byte(channelSecret)) == 1)
 }
 
 func processMessage(c *gin.Context, message *model.Message, user *model.User, needAuth bool) {
@@ -170,7 +173,7 @@ func processMessage(c *gin.Context, message *model.Message, user *model.User, ne
 			message.Content = fmt.Sprintf("```\n%s\n```", message.Content)
 		}
 	}
-	err = saveAndSendMessage(user, message, channel_)
+	err = saveAndSendMessage(c.Request.Context(), user, message, channel_)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -185,7 +188,7 @@ func processMessage(c *gin.Context, message *model.Message, user *model.User, ne
 	})
 }
 
-func saveAndSendMessage(user *model.User, message *model.Message, channel_ *model.Channel) error {
+func saveAndSendMessage(ctx context.Context, user *model.User, message *model.Message, channel_ *model.Channel) error {
 	if channel_.Status != common.ChannelStatusEnabled {
 		return errors.New("该渠道已被禁用")
 	}
@@ -194,8 +197,22 @@ func saveAndSendMessage(user *model.User, message *model.Message, channel_ *mode
 	if message.URL == "" {
 		message.URL = fmt.Sprintf("%s/message/%s", common.ServerAddress, message.Link)
 	}
+	if message.Async && gateway.DefaultService() != nil {
+		if !common.MessagePersistenceEnabled && user.SaveMessageToDatabase != common.SaveMessageToDatabaseAllowed {
+			return errors.New("异步发送消息需要用户具备消息持久化的权限")
+		}
+		if err := submitLegacyGateway(ctx, user, message, channel_); err != nil {
+			return err
+		}
+		syncMessageToUser(message, user.Id)
+		return nil
+	}
 	success := false
 	if common.MessagePersistenceEnabled || user.SaveMessageToDatabase == common.SaveMessageToDatabaseAllowed {
+		err := message.UpdateAndInsert(user.Id)
+		if err != nil {
+			return err
+		}
 		defer func() {
 			// Update the status of the message
 			status := common.MessageSendStatusFailed
@@ -214,17 +231,13 @@ func saveAndSendMessage(user *model.User, message *model.Message, channel_ *mode
 				channel.AsyncMessageQueue <- message.Id
 			}
 		}()
-		err := message.UpdateAndInsert(user.Id)
-		if err != nil {
-			return err
-		}
-		go syncMessageToUser(message, user.Id)
+		syncMessageToUser(message, user.Id)
 	} else {
 		if message.Async {
 			return errors.New("异步发送消息需要用户具备消息持久化的权限")
 		}
 		message.Link = "unsaved" // This is for user to identify whether the message is saved
-		go syncMessageToUser(message, user.Id)
+		syncMessageToUser(message, user.Id)
 	}
 	if !message.Async {
 		err := channel.SendMessage(message, user, channel_)
@@ -383,7 +396,7 @@ func ResendMessage(c *gin.Context) {
 		if err != nil {
 			return err
 		}
-		err = saveAndSendMessage(user, message, channel_)
+		err = saveAndSendMessage(c.Request.Context(), user, message, channel_)
 		if err != nil {
 			return err
 		}

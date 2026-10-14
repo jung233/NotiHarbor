@@ -9,6 +9,8 @@ func SendMessage(message *model.Message, user *model.User, channel_ *model.Chann
 	switch channel_.Type {
 	case model.TypeEmail:
 		return SendEmailMessage(message, user, channel_)
+	case model.TypeQQBotV2:
+		return SendQQBotMessage(message, user, channel_)
 	case model.TypeWeChatTestAccount:
 		return SendWeChatTestMessage(message, user, channel_)
 	case model.TypeWeChatCorpAccount:

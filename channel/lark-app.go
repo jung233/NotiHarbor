@@ -34,10 +34,7 @@ func (i *LarkAppTokenStoreItem) Key() string {
 }
 
 func (i *LarkAppTokenStoreItem) IsShared() bool {
-	var count int64 = 0
-	model.DB.Model(&model.Channel{}).Where("secret = ? and app_id = ? and type = ?",
-		i.AppSecret, i.AppID, model.TypeLarkApp).Count(&count)
-	return count > 1
+	return model.ChannelCredentialShared(i.AppID, model.TypeLarkApp, i.AppSecret)
 }
 
 func (i *LarkAppTokenStoreItem) IsFilled() bool {

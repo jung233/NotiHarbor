@@ -13,7 +13,8 @@ func GetOptions(c *gin.Context) {
 	var options []*model.Option
 	common.OptionMapRWMutex.Lock()
 	for k, v := range common.OptionMap {
-		if strings.Contains(k, "Token") || strings.Contains(k, "Secret") {
+		key := strings.ToLower(k)
+		if strings.Contains(key, "token") || strings.Contains(key, "secret") || strings.Contains(key, "password") {
 			continue
 		}
 		options = append(options, &model.Option{

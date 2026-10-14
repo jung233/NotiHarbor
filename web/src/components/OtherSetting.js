@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Divider, Form, Grid, Header, Modal } from 'semantic-ui-react';
-import { API, showError, showSuccess } from '../helpers';
+import { API, sanitizeHTML, showError, showSuccess } from '../helpers';
 import { marked } from 'marked';
 
 const OtherSetting = () => {
@@ -74,12 +74,12 @@ const OtherSetting = () => {
 
   const openGitHubRelease = () => {
     window.location =
-      'https://github.com/songquanpeng/message-pusher/releases/latest';
+      'https://github.com/jung233/NotiHarbor/releases/latest';
   };
 
   const checkUpdate = async () => {
     const res = await API.get(
-      'https://api.github.com/repos/songquanpeng/message-pusher/releases/latest'
+      'https://api.github.com/repos/jung233/NotiHarbor/releases/latest'
     );
     const { tag_name, body } = res.data;
     if (tag_name === process.env.REACT_APP_VERSION) {
@@ -154,7 +154,11 @@ const OtherSetting = () => {
         <Modal.Header>新版本：{updateData.tag_name}</Modal.Header>
         <Modal.Content>
           <Modal.Description>
-            <div dangerouslySetInnerHTML={{ __html: updateData.content }}></div>
+            <div
+              dangerouslySetInnerHTML={{
+                __html: sanitizeHTML(updateData.content),
+              }}
+            ></div>
           </Modal.Description>
         </Modal.Content>
         <Modal.Actions>

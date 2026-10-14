@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Header, Segment } from 'semantic-ui-react';
-import { API, showError } from '../../helpers';
+import { API, sanitizeHTML, showError } from '../../helpers';
 import { marked } from 'marked';
 
 const About = () => {
@@ -29,18 +29,27 @@ const About = () => {
   return (
     <>
       <Segment>
+        <Header as='h2'>NotiHarbor 讯港</Header>
+        <p><strong>A Reliable, Self-Hosted Notification Gateway</strong></p>
+        <p>可靠、自托管的统一消息通知网关。</p>
+        <p>
+          <a href='https://github.com/jung233/NotiHarbor' target='_blank' rel='noreferrer'>项目仓库</a>
+          {' · '}
+          <a href='https://github.com/jung233/NotiHarbor/issues' target='_blank' rel='noreferrer'>问题反馈</a>
+          {' · '}
+          <a href='https://github.com/jung233/NotiHarbor/tree/main/docs' target='_blank' rel='noreferrer'>文档</a>
+        </p>
+      </Segment>
+      <Segment>
         {aboutLoaded && about === '' ? (
           <>
-            <Header as='h3'>关于</Header>
-            <p>可在设置页面设置关于内容，支持 HTML & Markdown</p>
-            项目仓库地址：
-            <a href='https://github.com/songquanpeng/message-pusher'>
-              https://github.com/songquanpeng/message-pusher
-            </a>
+            <Header as='h3'>关于 NotiHarbor</Header>
+            <p>NotiHarbor 基于 JustSong 的 Message Pusher 开源项目构建，源代码遵循 MIT 协议。</p>
+            <p>可在设置页面设置关于内容，支持 HTML & Markdown。</p>
           </>
         ) : (
           <>
-            <div dangerouslySetInnerHTML={{ __html: about }}></div>
+            <div dangerouslySetInnerHTML={{ __html: sanitizeHTML(about) }}></div>
           </>
         )}
       </Segment>

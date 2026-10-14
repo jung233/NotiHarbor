@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"message-pusher/common"
 	"message-pusher/model"
 	"sync"
@@ -65,6 +66,10 @@ func channels2items(channels []*model.Channel) []TokenStoreItem {
 }
 
 func TokenStoreInit() {
+	TokenStoreInitContext(context.Background())
+}
+
+func TokenStoreInitContext(ctx context.Context) {
 	s.Map = make(map[string]*TokenStoreItem)
 	// https://developers.weixin.qq.com/doc/offiaccount/Basic_Information/Get_access_token.html
 	// https://developer.work.weixin.qq.com/document/path/91039
@@ -75,23 +80,24 @@ func TokenStoreInit() {
 			common.FatalLog(err.Error())
 		}
 		items := channels2items(channels)
-		s.Mutex.RLock()
+		s.Mutex.Lock()
 		for i := range items {
 			// s.Map[item.Key()] = &item  // This is wrong, you are getting the address of a local variable!
 			s.Map[items[i].Key()] = &items[i]
 		}
-		s.Mutex.RUnlock()
+		s.Mutex.Unlock()
 		for {
-			s.Mutex.RLock()
+			s.Mutex.Lock()
 			var tmpMap = make(map[string]*TokenStoreItem)
 			for k, v := range s.Map {
-				tmpMap[k] = v
+				copy := cloneTokenStoreItem(*v)
+				tmpMap[k] = &copy
 			}
-			s.Mutex.RUnlock()
+			s.Mutex.Unlock()
 			for k := range tmpMap {
 				(*tmpMap[k]).Refresh()
 			}
-			s.Mutex.RLock()
+			s.Mutex.Lock()
 			// we shouldn't directly replace the old map with the new map, cause the old map's keys may already change
 			for k := range s.Map {
 				v, okay := tmpMap[k]
@@ -100,10 +106,32 @@ func TokenStoreInit() {
 				}
 			}
 			sleepDuration := common.Max(s.ExpirationSeconds, 60)
-			s.Mutex.RUnlock()
-			time.Sleep(time.Duration(sleepDuration) * time.Second)
+			s.Mutex.Unlock()
+			timer := time.NewTimer(time.Duration(sleepDuration) * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 		}
 	}()
+}
+
+func cloneTokenStoreItem(item TokenStoreItem) TokenStoreItem {
+	switch original := item.(type) {
+	case *WeChatCorpAccountTokenStoreItem:
+		cloned := *original
+		return &cloned
+	case *WeChatTestAccountTokenStoreItem:
+		cloned := *original
+		return &cloned
+	case *LarkAppTokenStoreItem:
+		cloned := *original
+		return &cloned
+	default:
+		return item
+	}
 }
 
 // TokenStoreAddItem It's okay to add an incomplete item.
@@ -112,15 +140,15 @@ func TokenStoreAddItem(item TokenStoreItem) {
 		return
 	}
 	item.Refresh()
-	s.Mutex.RLock()
+	s.Mutex.Lock()
 	s.Map[item.Key()] = &item
-	s.Mutex.RUnlock()
+	s.Mutex.Unlock()
 }
 
 func TokenStoreRemoveItem(item TokenStoreItem) {
-	s.Mutex.RLock()
+	s.Mutex.Lock()
 	delete(s.Map, item.Key())
-	s.Mutex.RUnlock()
+	s.Mutex.Unlock()
 }
 
 func TokenStoreAddUser(user *model.User) {
@@ -252,12 +280,12 @@ func TokenStoreUpdateChannel(newChannel *model.Channel, oldChannel *model.Channe
 }
 
 func TokenStoreGetToken(key string) string {
-	s.Mutex.RLock()
-	defer s.Mutex.RUnlock()
+	s.Mutex.Lock()
+	defer s.Mutex.Unlock()
 	item, ok := s.Map[key]
 	if ok {
 		return (*item).Token()
 	}
-	common.SysError("token for " + key + " is blank!")
+	common.SysError("channel token unavailable")
 	return ""
 }

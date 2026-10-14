@@ -1,43 +1,55 @@
-name: Windows Release
+name: NotiHarbor Windows Release
 permissions:
-  contents: write
+  contents: read
 
 on:
-  push:
-    tags:
-      - '*'
+  workflow_dispatch:
+    inputs:
+      publish_draft:
+        description: Upload binaries to a draft GitHub Release (tag refs only)
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: notiharbor-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
+    if: ${{ inputs.publish_draft && github.ref_type == 'tag' }}
     runs-on: windows-latest
+    permissions:
+      contents: write
     defaults:
       run:
         shell: bash
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v7
         with:
-          node-version: 16
+          node-version: 20
       - name: Build Frontend
         env:
           CI: ""
         run: |
           cd web
-          npm install
-          REACT_APP_VERSION=$(git describe --tags) npm run build
+          npm ci --ignore-scripts --no-audit --no-fund
+          PUBLIC_URL=/ REACT_APP_VERSION=$(git describe --tags) npm run build
           cd ..
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v7
         with:
-          go-version: '>=1.18.0'
+          go-version: '1.26.x'
       - name: Build Backend
         run: |
           go mod download
           go build -ldflags "-s -w -X 'message-pusher/common.Version=$(git describe --tags)'" -o message-pusher.exe
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: message-pusher.exe

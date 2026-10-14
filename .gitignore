@@ -4,3 +4,9 @@ upload
 *.exe
 *.db
 build
+.env
+.env.*
+!.env.example
+data/
+logs/
+*.log

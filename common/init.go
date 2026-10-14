@@ -30,7 +30,7 @@ func printHelp() {
 	os.Exit(0)
 }
 
-func init() {
+func ParseCommandLine() {
 	flag.Parse()
 
 	if *PrintVersion {
@@ -41,13 +41,19 @@ func init() {
 	if *PrintHelp {
 		printHelp()
 	}
+	initializeLogDir()
+}
 
+func init() {
 	if os.Getenv("SESSION_SECRET") != "" {
 		SessionSecret = os.Getenv("SESSION_SECRET")
 	}
 	if os.Getenv("SQLITE_PATH") != "" {
 		SQLitePath = os.Getenv("SQLITE_PATH")
 	}
+}
+
+func initializeLogDir() {
 	if *LogDir != "" {
 		var err error
 		*LogDir, err = filepath.Abs(*LogDir)

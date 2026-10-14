@@ -37,7 +37,10 @@ func syncMessageToUser(message *model.Message, userId int) {
 	if !ok {
 		return
 	}
-	*messageChan <- message
+	select {
+	case *messageChan <- message:
+	default:
+	} // History remains durable when a slow browser falls behind.
 }
 
 func GetNewMessages(c *gin.Context) {
@@ -45,9 +48,14 @@ func GetNewMessages(c *gin.Context) {
 	messageChan := make(chan *model.Message, messageChanBufferSize)
 	messageChanStoreAdd(&messageChan, userId)
 	c.Stream(func(w io.Writer) bool {
-		if msg, ok := <-messageChan; ok {
-			c.SSEvent("message", *msg)
-			return true
+		select {
+		case <-c.Request.Context().Done():
+			return false
+		case msg, ok := <-messageChan:
+			if ok {
+				c.SSEvent("message", *msg)
+				return true
+			}
 		}
 		return false
 	})

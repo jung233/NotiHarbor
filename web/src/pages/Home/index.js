@@ -1,11 +1,11 @@
 import React, { useContext, useEffect } from 'react';
 import { Card, Grid, Header, Segment } from 'semantic-ui-react';
-import { API, showError, showNotice, timestamp2string } from '../../helpers';
+import { API, safeHttpURL, showError, showNotice, timestamp2string } from '../../helpers';
 import { StatusContext } from '../../context/Status';
 
 const Home = () => {
   const [statusState, statusDispatch] = useContext(StatusContext);
-  const homePageLink = localStorage.getItem('home_page_link') || '';
+  const homePageLink = safeHttpURL(localStorage.getItem('home_page_link') || '');
 
   const displayNotice = async () => {
     const res = await API.get('/api/notice');
@@ -34,12 +34,20 @@ const Home = () => {
       {homePageLink !== '' ? (
         <>
           <iframe
+            title='自定义首页'
             src={homePageLink}
             style={{ width: '100%', height: '100vh', border: 'none' }}
           />
         </>
       ) : (
         <>
+          <Segment>
+            <Header as='h2'>NotiHarbor 讯港</Header>
+            <p>
+              <strong>A Reliable, Self-Hosted Notification Gateway</strong>
+              {' / 可靠、自托管的统一消息通知网关'}
+            </p>
+          </Segment>
           <Segment>
             <Header as='h3'>系统状况</Header>
             <Grid columns={2} stackable>
@@ -52,13 +60,17 @@ const Home = () => {
                       <p>名称：{statusState?.status?.system_name}</p>
                       <p>版本：{statusState?.status?.version}</p>
                       <p>
-                        源码：
+                        项目源码：
                         <a
-                          href='https://github.com/songquanpeng/message-pusher'
-                          target='_blank'
+                          href='https://github.com/jung233/NotiHarbor'
+                          target='_blank' rel='noreferrer'
                         >
-                          https://github.com/songquanpeng/message-pusher
+                          NotiHarbor / 讯港
                         </a>
+                        {' · '}
+                        <a href='https://github.com/jung233/NotiHarbor/issues' target='_blank' rel='noreferrer'>问题反馈</a>
+                        {' · '}
+                        <a href='https://github.com/jung233/NotiHarbor/tree/main/docs' target='_blank' rel='noreferrer'>文档</a>
                       </p>
                       <p>启动时间：{getStartTimeString()}</p>
                       <p>自从上次启动已发送消息数目：{statusState?.status?.message_count}</p>

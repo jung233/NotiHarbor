@@ -15,6 +15,7 @@ import {
   showInfo,
   showSuccess,
   showWarning,
+  sanitizeHTML,
 } from '../helpers';
 
 import { ITEMS_PER_PAGE } from '../constants';
@@ -453,7 +454,7 @@ const MessagesTable = () => {
           {message.content ? (
             <div
               dangerouslySetInnerHTML={{
-                __html: marked.parse(message.content),
+                __html: sanitizeHTML(marked.parse(message.content)),
               }}
             ></div>
           ) : (

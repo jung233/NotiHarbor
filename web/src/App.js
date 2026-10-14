@@ -21,46 +21,65 @@ import EditChannel from './pages/Channel/EditChannel';
 import EditMessage from './pages/Message/EditMessage';
 import Webhook from './pages/Webhook';
 import EditWebhook from './pages/Webhook/EditWebhook';
+import AdminRoute from './components/AdminRoute';
+import { restoreUserSession } from './helpers/session';
+import GatewayDashboard from './pages/Gateway/Dashboard';
+import GatewayHistory from './pages/Gateway/History';
+import GatewayNotificationDetail from './pages/Gateway/NotificationDetail';
+import GatewayTester from './pages/Gateway/Tester';
+import GatewaySources from './pages/Gateway/Sources';
+import GatewayTargets from './pages/Gateway/Targets';
+import GatewayLogs from './pages/Gateway/Logs';
 
 const Home = lazy(() => import('./pages/Home'));
 const About = lazy(() => import('./pages/About'));
 
 function App() {
-  const [userState, userDispatch] = useContext(UserContext);
-  const [statusState, statusDispatch] = useContext(StatusContext);
+  const [, userDispatch] = useContext(UserContext);
+  const [, statusDispatch] = useContext(StatusContext);
 
-  const loadUser = () => {
-    let user = localStorage.getItem('user');
-    if (user) {
-      let data = JSON.parse(user);
-      userDispatch({ type: 'login', payload: data });
-    }
-  };
   const loadStatus = async () => {
-    const res = await API.get('/api/status');
-    const { success, data } = res.data;
-    if (success) {
-      localStorage.setItem('status', JSON.stringify(data));
-      statusDispatch({ type: 'set', payload: data });
-      localStorage.setItem('footer_html', data.footer_html);
-      localStorage.setItem('home_page_link', data.home_page_link);
-      if (
-        data.version !== process.env.REACT_APP_VERSION &&
-        data.version !== 'v0.0.0' &&
-        process.env.REACT_APP_VERSION !== ''
-      ) {
-        showNotice(
-          `新版本可用：${data.version}，请使用快捷键 Shift + F5 刷新页面`
-        );
+    try {
+      const res = await API.get('/api/status');
+      const { success, data } = res.data;
+      if (success) {
+        localStorage.setItem('status', JSON.stringify(data));
+        statusDispatch({ type: 'set', payload: data });
+        localStorage.setItem('footer_html', data.footer_html || '');
+        localStorage.setItem('home_page_link', data.home_page_link || '');
+        if (
+          data.version !== process.env.REACT_APP_VERSION &&
+          data.version !== 'v0.0.0' &&
+          process.env.REACT_APP_VERSION !== ''
+        ) {
+          showNotice(
+            `新版本可用：${data.version}，请使用快捷键 Shift + F5 刷新页面`
+          );
+        }
+      } else {
+        showError('无法正常连接至服务器！');
       }
-    } else {
-      showError('无法正常连接至服务器！');
+    } catch (error) {
+      showError(error);
     }
   };
 
   useEffect(() => {
-    loadUser();
+    const handleSessionExpired = () => {
+      localStorage.removeItem('user');
+      userDispatch({ type: 'logout' });
+    };
+    window.addEventListener('message-pusher-session-expired', handleSessionExpired);
+    restoreUserSession(API, userDispatch);
     loadStatus().then();
+    return () => {
+      window.removeEventListener(
+        'message-pusher-session-expired',
+        handleSessionExpired
+      );
+    };
+    // Session restoration and status loading should run once when App mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -168,6 +187,34 @@ function App() {
             <Message />
           </PrivateRoute>
         }
+      />
+      <Route
+        path='/gateway'
+        element={<AdminRoute><GatewayDashboard /></AdminRoute>}
+      />
+      <Route
+        path='/gateway/history'
+        element={<AdminRoute><GatewayHistory /></AdminRoute>}
+      />
+      <Route
+        path='/gateway/history/:id'
+        element={<AdminRoute><GatewayNotificationDetail /></AdminRoute>}
+      />
+      <Route
+        path='/gateway/logs'
+        element={<AdminRoute><GatewayLogs /></AdminRoute>}
+      />
+      <Route
+        path='/gateway/test'
+        element={<AdminRoute><GatewayTester /></AdminRoute>}
+      />
+      <Route
+        path='/gateway/sources'
+        element={<AdminRoute><GatewaySources /></AdminRoute>}
+      />
+      <Route
+        path='/gateway/targets'
+        element={<AdminRoute><GatewayTargets /></AdminRoute>}
       />
       <Route
         path='/editor'

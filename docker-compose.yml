@@ -1,13 +1,26 @@
-version: "3"
-
 services:
-  message-pusher:
-    image: justsong/message-pusher
+  notiharbor:
+    image: ${NOTIHARBOR_IMAGE:-notiharbor:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
-    ports:
-      - 3000:3000
+    init: true
+    stop_grace_period: 30s
+    env_file:
+      - .env
     environment:
-      - TZ=Asia/Shanghai
+      PORT: "3000"
+      SQLITE_PATH: /data/message-pusher.db
+      TZ: ${TZ:-UTC}
+    ports:
+      - "127.0.0.1:${HOST_PORT:-3000}:3000"
     volumes:
-      - ./data:/data
-      - /etc/localtime:/etc/localtime:ro
+      - "${DATA_DIR:-./data}:/data"
+    networks:
+      - services
+
+networks:
+  services:
+    external: true
+    name: ${DOCKER_NETWORK:?Set DOCKER_NETWORK to an existing Docker network}

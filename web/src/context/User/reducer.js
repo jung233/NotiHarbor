@@ -8,7 +8,12 @@ export const reducer = (state, action) => {
     case 'logout':
       return {
         ...state,
-        user: undefined
+        user: undefined,
+      };
+    case 'session-ready':
+      return {
+        ...state,
+        sessionReady: true,
       };
 
     default:
@@ -17,5 +22,6 @@ export const reducer = (state, action) => {
 };
 
 export const initialState = {
-  user: undefined
+  user: undefined,
+  sessionReady: false,
 };

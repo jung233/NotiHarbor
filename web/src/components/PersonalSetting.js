@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Divider, Form, Header, Image, Modal } from 'semantic-ui-react';
 import { Link } from 'react-router-dom';
-import { API, copy, showError, showInfo, showSuccess } from '../helpers';
+import { API, copy, openPage, showError, showInfo, showSuccess } from '../helpers';
 import Turnstile from 'react-turnstile';
 
 const PersonalSetting = () => {
@@ -60,9 +60,10 @@ const PersonalSetting = () => {
   };
 
   const openGitHubOAuth = () => {
-    window.open(
-      `https://github.com/login/oauth/authorize?client_id=${status.github_client_id}&scope=user:email`
-    );
+    const authUrl = new URL('https://github.com/login/oauth/authorize');
+    authUrl.searchParams.set('client_id', status.github_client_id || '');
+    authUrl.searchParams.set('scope', 'user:email');
+    openPage(authUrl.href);
   };
 
   const sendVerificationCode = async () => {

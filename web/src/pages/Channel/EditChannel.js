@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom';
 import { API, generateToken, showError, showSuccess } from '../../helpers';
 import { CHANNEL_OPTIONS } from '../../constants';
 import axios from 'axios';
+import { Link } from 'react-router-dom';
 
 const EditChannel = () => {
   const params = useParams();
@@ -25,6 +26,21 @@ const EditChannel = () => {
   };
 
   const [inputs, setInputs] = useState(originInputs);
+  const [qqConfig, setQqConfig] = useState({
+    bot_name: '',
+    default_target: '',
+    target_type: 'user',
+    message_type: 'text',
+    delivery_mode: 'active',
+    timeout_seconds: 10,
+    rate_limit_per_second: 5,
+    bot_rate_limit_per_minute: 30,
+    target_rate_limit_per_minute: 20,
+    target_rate_limit_per_day: 1000,
+    retry_max_attempts: 5,
+    retry_backoff_seconds: [30, 120, 300, 900],
+    markdown_template_id: '',
+  });
   const { type, name, description, secret, app_id, account_id, url, other } =
     inputs;
 
@@ -41,6 +57,20 @@ const EditChannel = () => {
         data.corp_id = corp_id;
         data.agent_id = agent_id;
       }
+      if (data.type === 'qqbot_v2') {
+        try {
+          const savedConfig = typeof data.other === 'string'
+            ? JSON.parse(data.other || '{}')
+            : data.other || {};
+          setQqConfig((current) => ({
+            ...current,
+            ...savedConfig,
+            default_target: savedConfig.default_target || data.account_id || '',
+          }));
+        } catch (error) {
+          showError('QQ Bot 配置格式无效，保存前请检查配置');
+        }
+      }
       setInputs(data);
     } else {
       showError(message);
@@ -51,12 +81,50 @@ const EditChannel = () => {
     if (isEditing) {
       loadChannel().then();
     }
+    // Load the selected channel once when the editor mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const submit = async () => {
     if (!name) return;
     let res = undefined;
     let localInputs = { ...inputs };
+    if (inputs.type === 'qqbot_v2') {
+      if (qqConfig.delivery_mode === 'wakeup' && qqConfig.target_type !== 'user') {
+        showError('互动召回仅支持 C2C 私聊目标');
+        return;
+      }
+      const backoff = Array.isArray(qqConfig.retry_backoff_seconds)
+        ? qqConfig.retry_backoff_seconds
+        : [];
+      if (
+        qqConfig.retry_max_attempts < 1 ||
+        qqConfig.retry_max_attempts > 20 ||
+        qqConfig.timeout_seconds < 1 ||
+        qqConfig.timeout_seconds > 60 ||
+        qqConfig.rate_limit_per_second < 1 ||
+        qqConfig.rate_limit_per_second > 5 ||
+        qqConfig.bot_rate_limit_per_minute < 1 ||
+        qqConfig.bot_rate_limit_per_minute > 30 ||
+        qqConfig.target_rate_limit_per_minute < 1 ||
+        qqConfig.target_rate_limit_per_minute > 20 ||
+        qqConfig.target_rate_limit_per_day < 1 ||
+        qqConfig.target_rate_limit_per_day > 1000 ||
+        backoff.length < 1 ||
+        backoff.length > 6 ||
+        backoff.some(
+          (seconds) =>
+            !Number.isInteger(seconds) || seconds < 1 || seconds > 86400
+        )
+      ) {
+        showError('超时需为 1–60 秒，Bot 每秒上限为 1–5、每分钟上限为 1–30，单目标每分钟上限为 1–20、每天上限为 1–1000；重试次数为 1–20，间隔需为 1–6 个 1–86400 秒的值');
+        return;
+      }
+      const defaultTarget = String(qqConfig.default_target || '').trim();
+      localInputs.account_id = defaultTarget;
+      localInputs.url = String(inputs.url || 'https://api.bot.qq.com').trim();
+      localInputs.other = JSON.stringify({ ...qqConfig, default_target: defaultTarget });
+    }
     switch (inputs.type) {
       case 'corp_app':
         localInputs.app_id = `${inputs.corp_id}|${inputs.agent_id}`;
@@ -159,7 +227,7 @@ const EditChannel = () => {
             <Message>
               通过微信测试号进行推送，点击前往配置：
               <a
-                target='_blank'
+                target='_blank' rel='noreferrer'
                 href='https://mp.weixin.qq.com/debug/cgi-bin/sandboxinfo?action=showinfo&t=sandbox/index'
               >
                 微信公众平台接口测试帐号
@@ -219,7 +287,7 @@ const EditChannel = () => {
             <Message>
               通过腾讯云自定义消息告警进行推送，
               <a
-                target='_blank'
+                target='_blank' rel='noreferrer'
                 href='https://github.com/songquanpeng/message-pusher/issues/87#issuecomment-1547971847'
               >
                 配置教程
@@ -271,7 +339,7 @@ const EditChannel = () => {
             <Message>
               通过企业微信应用号进行推送，点击前往配置：
               <a
-                target='_blank'
+                target='_blank' rel='noreferrer'
                 href='https://work.weixin.qq.com/wework_admin/frame#apps'
               >
                 企业微信应用管理
@@ -368,7 +436,7 @@ const EditChannel = () => {
               -> 设置 -> 群机器人 -> 添加机器人 -> 自定义机器人 -> 添加（
               <strong>注意选中「签名校验」</strong>）。具体参见：
               <a
-                target='_blank'
+                target='_blank' rel='noreferrer'
                 href='https://open.feishu.cn/document/ukTMukTMukTM/ucTM5YjL3ETO24yNxkjN'
               >
                 飞书开放文档
@@ -404,7 +472,7 @@ const EditChannel = () => {
               自定义 -> 添加（
               <strong>注意选中「加密」</strong>）。具体参见：
               <a
-                target='_blank'
+                target='_blank' rel='noreferrer'
                 href='https://open.dingtalk.com/document/robots/custom-robot-access'
               >
                 钉钉开放文档
@@ -467,7 +535,7 @@ const EditChannel = () => {
               通过 WebSocket
               客户端进行推送，可以使用官方客户端实现，或者根据协议自行实现。官方客户端
               <a
-                target='_blank'
+                target='_blank' rel='noreferrer'
                 href='https://github.com/songquanpeng/personal-assistant'
               >
                 详见此处
@@ -492,7 +560,7 @@ const EditChannel = () => {
           <>
             <Message>
               通过 Telegram 机器人进行消息推送。首先向
-              <a href='https://t.me/botfather' target='_blank'>
+              <a href='https://t.me/botfather' target='_blank' rel='noreferrer'>
                 {' '}
                 Bot Father{' '}
               </a>
@@ -549,7 +617,7 @@ const EditChannel = () => {
           <>
             <Message>
               通过 OneBot 协议进行推送，可以使用{' '}
-              <a href='https://github.com/Mrs4s/go-cqhttp' target='_blank'>
+              <a href='https://github.com/Mrs4s/go-cqhttp' target='_blank' rel='noreferrer'>
                 cqhttp
               </a>{' '}
               等实现。 利用 OneBot 协议可以实现推送 QQ 消息。
@@ -584,6 +652,157 @@ const EditChannel = () => {
                 placeholder='在此填写默认推送目标，例如 QQ 号'
               />
             </Form.Group>
+          </>
+        );
+      case 'qqbot_v2':
+        return (
+          <>
+            <Message info>
+              使用 QQ 官方 Bot API v2。App Secret 只会在创建或更换时提交，页面不会回显凭证。普通主动消息是默认模式，不依赖回调事件，但机器人所有者必须允许主动发送，否则平台会拒绝。被动回复需要目标最近的交互事件：官方概述列出 C2C 60 分钟内最多 4 次，但 msg_id 字段文档仍写 5 分钟；本系统暂按 5 分钟保守校验。群聊为 5 分钟内最多回复 5 次。互动召回仅支持 C2C 私聊。
+              <p>Token 状态和最近错误诊断当前不可用，管理页不会展示凭证。</p>
+            </Message>
+            <Form.Group widths='equal'>
+              <Form.Input
+                label='AppID'
+                name='app_id'
+                value={inputs.app_id}
+                onChange={handleInputChange}
+                autoComplete='off'
+              />
+              <Form.Input
+                label='Client Secret'
+                name='secret'
+                type='password'
+                value={inputs.secret}
+                onChange={handleInputChange}
+                autoComplete='new-password'
+                placeholder={isEditing ? '留空保留已保存凭证' : '输入 QQ Bot Client Secret'}
+              />
+              <Form.Input
+                label='机器人名称'
+                value={qqConfig.bot_name}
+                onChange={(event, { value }) => setQqConfig({ ...qqConfig, bot_name: value })}
+                placeholder='用于区分多个 QQ Bot 实例'
+              />
+              <Form.Input
+                label='QQ Bot API 基础地址'
+                name='url'
+                value={inputs.url}
+                onChange={handleInputChange}
+                placeholder='留空使用 https://api.bot.qq.com'
+              />
+            </Form.Group>
+            <Form.Group widths='equal'>
+              <Form.Input
+                label='默认目标 OpenID'
+                value={qqConfig.default_target}
+                onChange={(event, { value }) => setQqConfig({ ...qqConfig, default_target: value })}
+                placeholder='留空时在测试器或请求中选择目标'
+              />
+              <Form.Select
+                label='默认目标类型'
+                options={[
+                  { key: 'user', value: 'user', text: '私聊用户' },
+                  { key: 'group', value: 'group', text: '群聊' },
+                ]}
+                value={qqConfig.target_type}
+                onChange={(event, { value }) => setQqConfig((current) => ({
+                  ...current,
+                  target_type: value,
+                  delivery_mode: value === 'group' && current.delivery_mode === 'wakeup'
+                    ? 'active'
+                    : current.delivery_mode,
+                }))}
+              />
+              <Form.Select
+                label='消息格式'
+                options={[
+                  { key: 'text', value: 'text', text: '文本' },
+                  { key: 'markdown', value: 'markdown', text: 'Markdown' },
+                ]}
+                value={qqConfig.message_type}
+                onChange={(event, { value }) => setQqConfig({ ...qqConfig, message_type: value })}
+              />
+              <Form.Input
+                label='Markdown 模板 ID'
+                value={qqConfig.markdown_template_id}
+                onChange={(event, { value }) => setQqConfig({ ...qqConfig, markdown_template_id: value })}
+              />
+            </Form.Group>
+            <Form.Group widths='equal'>
+              <Form.Select
+                label='发送类型'
+                options={[
+                  { key: 'active', value: 'active', text: '普通主动消息（默认，无需回调）' },
+                  { key: 'passive', value: 'passive', text: '被动回复（需近期交互事件）' },
+                  { key: 'wakeup', value: 'wakeup', text: '互动召回（仅 C2C 私聊）', disabled: qqConfig.target_type !== 'user' },
+                ]}
+                value={qqConfig.delivery_mode}
+                onChange={(event, { value }) => setQqConfig((current) => ({ ...current, delivery_mode: value }))}
+              />
+              <Form.Input
+                type='number'
+                min='1'
+                max='60'
+                label='请求超时（秒）'
+                value={qqConfig.timeout_seconds}
+                onChange={(event, { value }) => setQqConfig({ ...qqConfig, timeout_seconds: Number(value) })}
+              />
+              <Form.Input
+                type='number'
+                min='1'
+                max='5'
+                label='Bot 每秒请求上限'
+                value={qqConfig.rate_limit_per_second}
+                onChange={(event, { value }) => setQqConfig((current) => ({ ...current, rate_limit_per_second: Number(value) }))}
+              />
+              <Form.Input
+                type='number'
+                min='1'
+                max='30'
+                label='Bot 每分钟请求上限'
+                value={qqConfig.bot_rate_limit_per_minute}
+                onChange={(event, { value }) => setQqConfig((current) => ({ ...current, bot_rate_limit_per_minute: Number(value) }))}
+              />
+              <Form.Input
+                type='number'
+                min='1'
+                max='20'
+                label='单目标每分钟上限'
+                value={qqConfig.target_rate_limit_per_minute}
+                onChange={(event, { value }) => setQqConfig((current) => ({ ...current, target_rate_limit_per_minute: Number(value) }))}
+              />
+              <Form.Input
+                type='number'
+                min='1'
+                max='1000'
+                label='单目标每天上限'
+                value={qqConfig.target_rate_limit_per_day}
+                onChange={(event, { value }) => setQqConfig((current) => ({ ...current, target_rate_limit_per_day: Number(value) }))}
+              />
+            </Form.Group>
+            <Form.Group widths='equal'>
+              <Form.Input
+                type='number'
+                min='1'
+                max='20'
+                label='最大尝试次数（1–20）'
+                value={qqConfig.retry_max_attempts}
+                onChange={(event, { value }) => setQqConfig({ ...qqConfig, retry_max_attempts: Number(value) })}
+              />
+              <Form.Input
+                label='重试间隔（秒，逗号分隔，最多 6 个）'
+                value={Array.isArray(qqConfig.retry_backoff_seconds) ? qqConfig.retry_backoff_seconds.join(',') : ''}
+                onChange={(event, { value }) => setQqConfig({
+                  ...qqConfig,
+                  retry_backoff_seconds: value === ''
+                    ? []
+                    : value.split(',').map((part) => Number(part.trim())),
+                })}
+              />
+            </Form.Group>
+            <Button as={Link} to='/gateway/targets'>管理 OpenID 目标</Button>
+            <Button as={Link} to='/gateway/test'>打开消息测试器</Button>
           </>
         );
       case 'group':
@@ -621,7 +840,7 @@ const EditChannel = () => {
           <>
             <Message>
               通过飞书自建应用进行推送，点击前往配置：
-              <a target='_blank' href='https://open.feishu.cn/app'>
+              <a target='_blank' rel='noreferrer' href='https://open.feishu.cn/app'>
                 飞书开放平台
               </a>
               。
@@ -639,7 +858,7 @@ const EditChannel = () => {
               ，详见飞书
               <a
                 href='https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/create#bc6d1214'
-                target='_blank'
+                target='_blank' rel='noreferrer'
               >
                 开发文档
               </a>
@@ -684,7 +903,7 @@ const EditChannel = () => {
               <br />
               <a
                 href='https://iamazing.cn/page/message-pusher-common-custom-templates'
-                target='_blank'
+                target='_blank' rel='noreferrer'
               >
                 这个页面
               </a>

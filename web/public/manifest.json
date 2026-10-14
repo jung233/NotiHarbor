@@ -1,0 +1,17 @@
+{
+  "name": "NotiHarbor 讯港",
+  "short_name": "NotiHarbor",
+  "description": "A Reliable, Self-Hosted Notification Gateway / 可靠、自托管的统一消息通知网关",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

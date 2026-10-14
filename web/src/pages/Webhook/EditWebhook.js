@@ -136,7 +136,7 @@ const EditWebhook = () => {
             如果你不知道如何写提取规则和构建规则，请看
             <a
               href='https://iamazing.cn/page/message-pusher-webhook'
-              target='_blank'
+              target='_blank' rel='noreferrer'
             >
               此教程
             </a>

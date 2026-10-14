@@ -1,14 +1,13 @@
 package common
 
 import (
-	"github.com/google/uuid"
 	"sync"
 	"time"
 )
 
 var StartTime = time.Now().Unix() // unit: second
 var Version = "v0.0.0"
-var SystemName = "消息推送服务"
+var SystemName = "讯港 · NotiHarbor"
 var ServerAddress = "http://localhost:3000"
 var Footer = ""
 var HomePageLink = ""
@@ -17,7 +16,7 @@ var UserCount = 0    // Non critical value, no need to use atomic
 
 // Any options with "Secret", "Token" in its key won't be return by GetOptions
 
-var SessionSecret = uuid.New().String()
+var SessionSecret = ""
 var SQLitePath = "message-pusher.db"
 
 var OptionMap map[string]string
@@ -31,7 +30,7 @@ var EmailVerificationEnabled = false
 var GitHubOAuthEnabled = false
 var WeChatAuthEnabled = false
 var TurnstileCheckEnabled = false
-var RegisterEnabled = true
+var RegisterEnabled = false
 var MessagePersistenceEnabled = true
 var MessageRenderEnabled = true
 

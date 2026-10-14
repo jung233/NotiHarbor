@@ -1,6 +1,13 @@
 {
-  "name": "react-template",
+  "name": "notiharbor-web",
   "version": "0.1.0",
+  "description": "NotiHarbor 讯港 — A Reliable, Self-Hosted Notification Gateway / 可靠、自托管的统一消息通知网关",
+  "homepage": "https://github.com/jung233/NotiHarbor#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jung233/NotiHarbor.git"
+  },
+  "license": "MIT",
   "private": true,
   "dependencies": {
     "axios": "^0.27.2",
@@ -40,7 +47,8 @@
     ]
   },
   "devDependencies": {
-    "prettier": "^2.7.1"
+    "prettier": "^2.7.1",
+    "typescript": "4.9.5"
   },
   "prettier": {
     "singleQuote": true,
