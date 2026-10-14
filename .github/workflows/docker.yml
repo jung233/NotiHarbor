@@ -86,10 +86,36 @@ jobs:
           failure-threshold: error
 
       - name: Validate GitHub Actions workflows
-        uses: docker://rhysd/actionlint:1.7.12
-        with:
-          args: >-
-            -color -format '{{range $err := .}}::error file={{$err.Filepath}},line={{$err.Line}},col={{$err.Column}}::{{$err.Message}}{{"\n"}}{{end}}'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="1.7.12"
+          tool_dir="$RUNNER_TEMP/actionlint"
+          archive_name="actionlint_${version}_linux_amd64.tar.gz"
+          checksums_name="actionlint_${version}_checksums.txt"
+          archive="$tool_dir/$archive_name"
+          checksums="$tool_dir/$checksums_name"
+          mkdir -p "$tool_dir"
+
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${version}/${archive_name}"
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$checksums" \
+            "https://github.com/rhysd/actionlint/releases/download/v${version}/${checksums_name}"
+
+          printf '%s  %s\n' \
+            '433028cf0ba3c42163ea1a668dedce30fcdbe84fe912b1a5e288c006eab8a4f5' \
+            "$checksums" | sha256sum --check --status
+          (
+            cd "$tool_dir"
+            grep -F "  $archive_name" "$checksums_name" | sha256sum --check --strict
+          )
+          tar -xzf "$archive" -C "$tool_dir"
+
+          # Limit SC2016 suppression to the literal actionlint template below.
+          # shellcheck disable=SC2016
+          "$tool_dir/actionlint" -color -format '{{range $err := .}}::error file={{$err.Filepath}},line={{$err.Line}},col={{$err.Column}}::{{$err.Message}}%0A```%0A{{replace $err.Snippet "\\n" "%0A"}}%0A```\n{{end}}'
 
   remote-tests:
     name: Remote mock tests

@@ -367,11 +367,12 @@ func TestGatewayTargetUpdateCannotCrossSourceOrForgeInteraction(t *testing.T) {
 	if unchanged.Name != "target-b" || unchanged.SourceID != sourceB.Id {
 		t.Fatalf("cross-source target was modified: %+v", unchanged)
 	}
-	if err := f.db.Where("id = ?", targetA.Id).First(&unchanged).Error; err != nil {
+	var unchangedTargetA model.Target
+	if err := f.db.Where("id = ?", targetA.Id).First(&unchangedTargetA).Error; err != nil {
 		t.Fatal(err)
 	}
-	if unchanged.ChannelID != channelAID {
-		t.Fatalf("rejected target channel change persisted: %+v", unchanged)
+	if unchangedTargetA.ChannelID != channelAID {
+		t.Fatalf("rejected target channel change persisted: %+v", unchangedTargetA)
 	}
 }
 
