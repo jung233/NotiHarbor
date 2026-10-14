@@ -43,7 +43,7 @@ func TestBuildQQBotMessageUsesPassiveMessageReply(t *testing.T) {
 
 func TestBuildQQBotMarkdownUsesMarkdownFieldWithoutTopLevelContent(t *testing.T) {
 	message := &model.Message{Title: "Notice", Content: "Body"}
-	payload, err := buildQQBotMessage(message, qqBotConfig{MessageType: "markdown"}, QQBotDeliveryMetadata{}, "user")
+	payload, err := buildQQBotMessage(message, qqBotConfig{DeliveryMode: "active", MessageType: "markdown"}, QQBotDeliveryMetadata{}, "user")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestQQBotSendRequiresConfirmedProviderResponse(t *testing.T) {
 		{name: "message id confirms acceptance", body: `{"id":"message-1"}`, wantAccepted: true},
 		{name: "empty body is unknown", body: "", wantUnknown: true},
 		{name: "malformed body is unknown", body: `{"id":`, wantUnknown: true},
-		{name: "missing message id is unknown", body: `{"code":0}`, wantUnknown: true},
+		{name: "missing message id is unknown", body: `{"code":0}`, wantUnknown: true, wantCode: "0"},
 		{name: "moderation accepted", body: `{"code":304023}`, wantAccepted: true, wantCode: "304023"},
 		{name: "business permission error", body: `{"code":40034105,"message":"no active permission"}`, wantCode: "40034105"},
 	}

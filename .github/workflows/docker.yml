@@ -88,7 +88,8 @@ jobs:
       - name: Validate GitHub Actions workflows
         uses: docker://rhysd/actionlint:1.7.12
         with:
-          args: -color
+          args: >-
+            -color -format '{{range $err := .}}::error file={{$err.Filepath}},line={{$err.Line}},col={{$err.Column}}::{{$err.Message}}{{"\n"}}{{end}}'
 
   remote-tests:
     name: Remote mock tests
@@ -160,9 +161,13 @@ jobs:
             python3 - "$RUNNER_TEMP/go-tests.log" <<'PY'
           import pathlib, sys
           output = pathlib.Path(sys.argv[1]).read_text(errors="replace")
-          tail = "\n".join(output.splitlines()[-100:])[-12000:]
-          escaped = tail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          print(f"::error title=Go test failure::{escaped}")
+          lines = output.splitlines()
+          failures = [line for line in lines if "FAIL" in line or "_test.go:" in line]
+          text = "\n".join(failures or lines[-60:])[-24000:]
+          for index in range(0, len(text), 3000):
+              chunk = text[index:index + 3000]
+              escaped = chunk.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Go test failure::{escaped}")
           PY
             exit 1
           }
