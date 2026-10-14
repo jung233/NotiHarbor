@@ -21,7 +21,9 @@ GHCR push 只发生在：
 
 Pull request、其他分支 push 和手动触发会验证镜像，但不发布镜像。手动触发本身不会绕过发布条件。默认分支生成 latest 与不可变 commit SHA 标签；所有可发布提交会生成 sha-<commit>；形如 v1.2.3 的 SemVer 标签额外生成版本标签。发布后输出摘要和架构信息。
 
-同一 Git ref 的容器流水线通过 concurrency group 串行化，避免较旧构建晚完成后覆盖新标签。三个 legacy binary release workflow 已改为只接受 tag 上的显式 workflow_dispatch，并默认不上传；只有手动选择 publish_draft 才创建 draft release。它们使用同一个 tag concurrency group，防止并发改写同一个 draft。`github-pages.yml` 也只支持手动触发，限制从仓库默认分支部署，使用 GitHub 官方 Pages artifact actions 与最小 GITHUB_TOKEN 权限。旧的自动 Docker publication workflows 已移除。
+同一 Git ref 的容器流水线通过 concurrency group 串行化，避免较旧构建晚完成后覆盖新标签。三个 legacy binary release workflow 已改为只接受 tag 上的显式 workflow_dispatch，并默认不上传；只有手动选择 publish_draft 才创建 draft release。它们分别使用按平台和 tag 区分的 concurrency group，避免同平台重复运行。`github-pages.yml` 也只支持手动触发，限制从仓库默认分支部署，使用 GitHub 官方 Pages artifact actions 与最小 GITHUB_TOKEN 权限。旧的自动 Docker publication workflows 已移除。
+
+推送正式 `vMAJOR.MINOR.PATCH` 标签后，主工作流会在测试、双架构镜像及 manifest 发布成功后创建正式 GitHub Release，并使用 `docs/releases/<tag>.md` 作为发布说明。Release 包含 GitHub 自动提供的源码归档和固定版本 GHCR 镜像说明；独立二进制不由此流程上传。Release job 单独使用 `contents:write` 权限。
 
 工作流使用 GitHub 提供的 GITHUB_TOKEN。Fork PR 不接触发布 secrets；GHCR 发布权限只用于满足发布条件的 job。
 
