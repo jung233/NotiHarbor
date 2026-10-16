@@ -79,6 +79,85 @@ func TestNotificationOutboxAtomicityAndIdempotency(t *testing.T) {
 	})
 }
 
+func TestSessionHistoryUnionSQLCI(t *testing.T) {
+	t.Run("sqlite", func(t *testing.T) { checkSessionHistoryUnionSQL(t, "") })
+	t.Run("mysql-ci", func(t *testing.T) {
+		dsn := os.Getenv("CI_MYSQL_DSN")
+		if dsn == "" {
+			t.Skip("CI MySQL fixture not provided")
+		}
+		checkSessionHistoryUnionSQL(t, dsn)
+	})
+}
+
+func checkSessionHistoryUnionSQL(t *testing.T, dsn string) {
+	t.Helper()
+	db, req := persistenceFixture(t, dsn)
+	if err := db.AutoMigrate(&model.Message{}); err != nil {
+		t.Fatal(err)
+	}
+	legacySourceID := common.LegacySourceID(1)
+	legacySource := model.Source{
+		Id: legacySourceID, OwnerUserID: 1, Name: "Legacy /push",
+		AllowedChannelIDsJSON: "[\"" + req.Deliveries[0].ChannelID + "\"]", Status: model.GatewayStatusActive,
+	}
+	if err := db.Create(&legacySource).Error; err != nil {
+		t.Fatal(err)
+	}
+	unbridged := model.Message{
+		Link: newID(), UserId: 1, Title: "unbridged legacy", Content: "archive", Channel: "fixture",
+		Timestamp: time.Now().Add(-time.Hour).Unix(), Status: common.MessageSendStatusSent,
+	}
+	bridged := model.Message{
+		Link: newID(), UserId: 1, Title: "bridged legacy", Content: "already represented", Channel: "fixture",
+		Timestamp: time.Now().Unix(), Status: common.MessageSendStatusAsyncPending,
+	}
+	for _, message := range []*model.Message{&unbridged, &bridged} {
+		if err := db.Create(message).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	createdAt := time.Now().UTC()
+	bridgedNotification := model.Notification{
+		Id: newID(), SourceID: legacySourceID, IdempotencyKey: "legacy:" + strconv.Itoa(bridged.Id),
+		RequestHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Title:       bridged.Title, Content: bridged.Content,
+		MetadataJSON: "{\"legacy_message_id\":" + strconv.Itoa(bridged.Id) + "}",
+		Priority:     "normal", DeliveryPolicy: PolicyBroadcast, Status: model.NotificationQueued,
+		CreatedAt: createdAt, UpdatedAt: createdAt,
+	}
+	if err := db.Create(&bridgedNotification).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = db.Where("id = ?", bridgedNotification.Id).Delete(&model.Notification{}).Error
+		_ = db.Where("id = ?", legacySourceID).Delete(&model.Source{}).Error
+		_ = db.Where("id IN ?", []int{unbridged.Id, bridged.Id}).Delete(&model.Message{}).Error
+	})
+
+	service := NewService(db, nil, nil, Options{})
+	from, to := createdAt.Add(-2*time.Hour), createdAt.Add(time.Second)
+	filter := NotificationFilter{
+		From: &from, To: &to, OwnerUserID: 1, Search: "legacy",
+		Page: 1, PageSize: 1, IncludeLegacyArchive: true,
+	}
+	pageOne, total, err := service.ListNotifications(context.Background(), filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 || len(pageOne) != 1 || pageOne[0].Id != bridgedNotification.Id {
+		t.Fatalf("first union page=%+v total=%d; want bridged gateway row then one archive row", pageOne, total)
+	}
+	filter.Page = 2
+	pageTwo, secondTotal, err := service.ListNotifications(context.Background(), filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondTotal != 2 || len(pageTwo) != 1 || pageTwo[0].Id != LegacyArchiveIDPrefix+strconv.Itoa(unbridged.Id) {
+		t.Fatalf("second union page=%+v total=%d; want the unbridged archive row", pageTwo, secondTotal)
+	}
+}
+
 func checkPersistence(t *testing.T, dsn string) {
 	db, req := persistenceFixture(t, dsn)
 	s := NewService(db, nil, nil, Options{})

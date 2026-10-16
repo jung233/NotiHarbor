@@ -220,6 +220,285 @@ func TestGatewayNotificationIdempotencyAndSourceIsolation(t *testing.T) {
 	}
 }
 
+func TestSessionNotificationHistoryIncludesUnbridgedLegacyArchivesOnly(t *testing.T) {
+	f := newGatewayAPITestFixture(t)
+	if err := f.db.AutoMigrate(&model.Message{}); err != nil {
+		t.Fatal(err)
+	}
+	channel := f.createChannel(t, "history-channel", model.TypeNone, "destination")
+	channelID := strconv.Itoa(channel.Id)
+	legacySourceID := common.LegacySourceID(f.ownerID)
+	legacySource := model.Source{
+		Id: legacySourceID, OwnerUserID: f.ownerID, Name: "Legacy /push",
+		AllowedChannelIDsJSON: "[\"" + channelID + "\"]", Status: model.GatewayStatusActive,
+	}
+	if err := f.db.Create(&legacySource).Error; err != nil {
+		t.Fatal(err)
+	}
+	archiveOld := model.Message{
+		UserId: f.ownerID, Title: "archive old", Content: "legacy body", Channel: channel.Name,
+		Timestamp: time.Now().Add(-2 * time.Hour).Unix(), Status: common.MessageSendStatusSent, Link: uuid.NewString(),
+	}
+	archiveNew := model.Message{
+		UserId: f.ownerID, Title: "archive new", Content: "another legacy body", Channel: channel.Name,
+		Timestamp: time.Now().Add(-time.Hour).Unix(), Status: common.MessageSendStatusSent, Link: uuid.NewString(),
+	}
+	bridgedMessage := model.Message{
+		UserId: f.ownerID, Title: "bridged row", Content: "already in gateway", Channel: channel.Name,
+		Timestamp: time.Now().Add(-30 * time.Minute).Unix(), Status: common.MessageSendStatusAsyncPending, Link: uuid.NewString(),
+	}
+	for _, message := range []*model.Message{&archiveOld, &archiveNew, &bridgedMessage} {
+		if err := f.db.Create(message).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	bridgedNotification, _, err := f.service.Enqueue(context.Background(), gateway.EnqueueRequest{
+		SourceID: legacySourceID, IdempotencyKey: "legacy:" + strconv.Itoa(bridgedMessage.Id),
+		Title: bridgedMessage.Title, Content: bridgedMessage.Content,
+		Deliveries: []gateway.DeliverySpec{{ChannelID: channelID, ChannelName: channel.Name, ChannelType: channel.Type}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	collisionSource := f.createSource(t, "history-collision-source", channelID)
+	collisionNotification, _, err := f.service.Enqueue(context.Background(), gateway.EnqueueRequest{
+		SourceID: collisionSource.Id, IdempotencyKey: "legacy:" + strconv.Itoa(archiveOld.Id),
+		Title: "external collision", Content: "must not hide the historical row",
+		Deliveries: []gateway.DeliverySpec{{ChannelID: channelID, ChannelName: channel.Name, ChannelType: channel.Type}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalSource := f.createSource(t, "history-source", channelID)
+	normalNotification := enqueueGatewayTestNotification(t, f.service, normalSource, channel, "history-normal")
+	key, _ := f.createKey(t, normalSource.Id, "history-key", gateway.ScopeNotificationsRead)
+	legacyKey, _ := f.createKey(t, legacySourceID, "legacy-history-key", gateway.ScopeNotificationsRead)
+
+	otherOwnerID := 43
+	if err := f.db.Create(&model.User{
+		Id: otherOwnerID, Username: "history-private-owner", Role: common.RoleCommonUser, Status: common.UserStatusEnabled,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	otherArchive := model.Message{
+		UserId: otherOwnerID, Title: "private archive", Content: "other user's content",
+		Timestamp: time.Now().Unix(), Status: common.MessageSendStatusSent, Link: uuid.NewString(),
+	}
+	if err := f.db.Create(&otherArchive).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	engine := gin.New()
+	engine.GET("/api/v1/admin/notifications", gatewayTestSessionContext(f.ownerID), ListGatewayNotifications)
+	engine.GET("/api/v1/admin/notifications/:id", gatewayTestSessionContext(f.ownerID), GetGatewayNotification)
+	engine.POST("/api/v1/admin/notifications/:id/retry", gatewayTestSessionContext(f.ownerID), RetryGatewayNotification)
+	engine.POST("/api/v1/admin/notifications/:id/cancel", gatewayTestSessionContext(f.ownerID), CancelGatewayNotification)
+	engine.POST("/api/v1/admin/notifications/:id/resend", gatewayTestSessionContext(f.ownerID), ResendGatewayNotification)
+	engine.GET("/api/v1/notifications", gatewayTestAPIKeyContext(key, normalSource), ListGatewayNotifications)
+
+	list := gatewayAPIRequest(t, engine, http.MethodGet, "/api/v1/admin/notifications?page_size=100", "", nil)
+	if list.Code != http.StatusOK {
+		t.Fatalf("session notification history status=%d, body=%s", list.Code, list.Body.String())
+	}
+	data := gatewayResponseData(t, list)
+	if total, _ := data["total"].(float64); total != 5 {
+		t.Fatalf("session history total=%v, want two archive rows and three gateway rows", data["total"])
+	}
+	items, _ := data["items"].([]interface{})
+	found := map[string]int{}
+	for _, raw := range items {
+		item, _ := raw.(map[string]interface{})
+		id, _ := item["id"].(string)
+		found[id]++
+	}
+	for _, id := range []string{
+		"legacy-archive:" + strconv.Itoa(archiveOld.Id),
+		"legacy-archive:" + strconv.Itoa(archiveNew.Id),
+		bridgedNotification.Id, collisionNotification.Id, normalNotification.Id,
+	} {
+		if found[id] != 1 {
+			t.Fatalf("history contains id %q %d times, want exactly once; IDs=%v", id, found[id], found)
+		}
+	}
+	if found["legacy-archive:"+strconv.Itoa(bridgedMessage.Id)] != 0 || found["legacy-archive:"+strconv.Itoa(otherArchive.Id)] != 0 {
+		t.Fatalf("bridged or other-user legacy message leaked into history: %v", found)
+	}
+
+	legacySourceList := gatewayAPIRequest(t, engine, http.MethodGet, "/api/v1/admin/notifications?page_size=100&source_id="+legacySourceID, "", nil)
+	if legacySourceList.Code != http.StatusOK {
+		t.Fatalf("legacy source history status=%d, body=%s", legacySourceList.Code, legacySourceList.Body.String())
+	}
+	legacySourceData := gatewayResponseData(t, legacySourceList)
+	if total, _ := legacySourceData["total"].(float64); total != 3 {
+		t.Fatalf("legacy source history total=%v, want two archives and one bridged gateway row", legacySourceData["total"])
+	}
+
+	adminEngine := gin.New()
+	adminEngine.GET("/api/v1/admin/notifications", func(c *gin.Context) {
+		c.Set("id", 1)
+		c.Set("role", common.RoleAdminUser)
+		c.Next()
+	}, ListGatewayNotifications)
+	adminList := gatewayAPIRequest(t, adminEngine, http.MethodGet, "/api/v1/admin/notifications?page_size=100", "", nil)
+	if adminList.Code != http.StatusOK {
+		t.Fatalf("admin notification history status=%d, body=%s", adminList.Code, adminList.Body.String())
+	}
+	adminData := gatewayResponseData(t, adminList)
+	if total, _ := adminData["total"].(float64); total != 6 {
+		t.Fatalf("admin history total=%v, want all five gateway/owner rows plus the other user's archive", adminData["total"])
+	}
+	adminItems, _ := adminData["items"].([]interface{})
+	adminFoundOtherArchive := false
+	for _, raw := range adminItems {
+		item, _ := raw.(map[string]interface{})
+		if item["id"] == "legacy-archive:"+strconv.Itoa(otherArchive.Id) {
+			adminFoundOtherArchive = true
+			break
+		}
+	}
+	if !adminFoundOtherArchive {
+		t.Fatal("admin history omitted another user's legacy archive")
+	}
+
+	page := gatewayAPIRequest(t, engine, http.MethodGet, "/api/v1/admin/notifications?page=2&page_size=1&search=archive", "", nil)
+	if page.Code != http.StatusOK {
+		t.Fatalf("filtered archive page status=%d, body=%s", page.Code, page.Body.String())
+	}
+	pageData := gatewayResponseData(t, page)
+	if total, _ := pageData["total"].(float64); total != 2 {
+		t.Fatalf("filtered archive count=%v, want 2", pageData["total"])
+	}
+	pageItems, _ := pageData["items"].([]interface{})
+	if len(pageItems) != 1 {
+		t.Fatalf("second archive page contains %d rows, want 1", len(pageItems))
+	}
+	pageItem, _ := pageItems[0].(map[string]interface{})
+	if pageItem["id"] != "legacy-archive:"+strconv.Itoa(archiveOld.Id) {
+		t.Fatalf("second archive page returned %v, want older archive", pageItem["id"])
+	}
+
+	detail := gatewayAPIRequest(t, engine, http.MethodGet, "/api/v1/admin/notifications/legacy-archive:"+strconv.Itoa(archiveOld.Id), "", nil)
+	if detail.Code != http.StatusOK {
+		t.Fatalf("archive detail status=%d, body=%s", detail.Code, detail.Body.String())
+	}
+	detailData := gatewayResponseData(t, detail)
+	notification, _ := detailData["notification"].(map[string]interface{})
+	if notification["id"] != "legacy-archive:"+strconv.Itoa(archiveOld.Id) || notification["status"] != model.NotificationAccepted {
+		t.Fatalf("archive detail was not normalized: %#v", notification)
+	}
+	metadataText, _ := notification["metadata"].(string)
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(metadataText), &metadata); err != nil || metadata["archive"] != true || metadata["legacy_message_id"] != float64(archiveOld.Id) {
+		t.Fatalf("archive metadata=%q parsed=%#v err=%v", metadataText, metadata, err)
+	}
+	deliveries, _ := detailData["deliveries"].([]interface{})
+	if len(deliveries) != 0 {
+		t.Fatalf("archive detail returned %d deliveries, want none", len(deliveries))
+	}
+	privateDetail := gatewayAPIRequest(t, engine, http.MethodGet, "/api/v1/admin/notifications/legacy-archive:"+strconv.Itoa(otherArchive.Id), "", nil)
+	if privateDetail.Code != http.StatusNotFound {
+		t.Fatalf("other user's archive detail status=%d, want 404", privateDetail.Code)
+	}
+	bridgedArchiveDetail := gatewayAPIRequest(t, engine, http.MethodGet, "/api/v1/admin/notifications/legacy-archive:"+strconv.Itoa(bridgedMessage.Id), "", nil)
+	if bridgedArchiveDetail.Code != http.StatusNotFound {
+		t.Fatalf("bridged message archive detail status=%d, want 404", bridgedArchiveDetail.Code)
+	}
+	for _, operation := range []string{"retry", "cancel", "resend"} {
+		response := gatewayAPIRequest(t, engine, http.MethodPost, "/api/v1/admin/notifications/legacy-archive:"+strconv.Itoa(archiveOld.Id)+"/"+operation, "{}", nil)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("archive %s status=%d, want 404", operation, response.Code)
+		}
+	}
+	if f.sender.calls != 0 {
+		t.Fatalf("archive action unexpectedly reached sender %d times", f.sender.calls)
+	}
+
+	apiKeyList := gatewayAPIRequest(t, engine, http.MethodGet, "/api/v1/notifications", "", nil)
+	if apiKeyList.Code != http.StatusOK {
+		t.Fatalf("API key notification list status=%d, body=%s", apiKeyList.Code, apiKeyList.Body.String())
+	}
+	apiKeyData := gatewayResponseData(t, apiKeyList)
+	if total, _ := apiKeyData["total"].(float64); total != 1 {
+		t.Fatalf("API key list included archive/other-source rows: total=%v", apiKeyData["total"])
+	}
+	legacyAPIKeyEngine := gin.New()
+	legacyAPIKeyEngine.GET("/api/v1/notifications", gatewayTestAPIKeyContext(legacyKey, &legacySource), ListGatewayNotifications)
+	legacyAPIKeyList := gatewayAPIRequest(t, legacyAPIKeyEngine, http.MethodGet, "/api/v1/notifications", "", nil)
+	if legacyAPIKeyList.Code != http.StatusOK {
+		t.Fatalf("legacy-source API key list status=%d, body=%s", legacyAPIKeyList.Code, legacyAPIKeyList.Body.String())
+	}
+	legacyAPIKeyData := gatewayResponseData(t, legacyAPIKeyList)
+	if total, _ := legacyAPIKeyData["total"].(float64); total != 1 {
+		t.Fatalf("legacy-source API key list included archive rows: total=%v, want the bridged gateway row only", legacyAPIKeyData["total"])
+	}
+}
+
+func TestSessionGatewayLogsIncludeAllOwnedSourcesAndExcludeOtherOwners(t *testing.T) {
+	f := newGatewayAPITestFixture(t)
+	channel := f.createChannel(t, "logs-channel", model.TypeNone, "destination")
+	channelID := strconv.Itoa(channel.Id)
+	sourceA := f.createSource(t, "logs-source-a", channelID)
+	sourceB := f.createSource(t, "logs-source-b", channelID)
+	notificationA := enqueueGatewayTestNotification(t, f.service, sourceA, channel, "logs-a")
+	notificationB := enqueueGatewayTestNotification(t, f.service, sourceB, channel, "logs-b")
+
+	otherOwnerID := 44
+	if err := f.db.Create(&model.User{
+		Id: otherOwnerID, Username: "logs-private-owner", Role: common.RoleCommonUser, Status: common.UserStatusEnabled,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	otherChannel := model.Channel{UserId: otherOwnerID, Name: "other-logs-channel", Type: model.TypeNone, Status: common.ChannelStatusEnabled}
+	if err := f.db.Create(&otherChannel).Error; err != nil {
+		t.Fatal(err)
+	}
+	otherSource, err := f.service.CreateSource(context.Background(), otherOwnerID, gateway.SourceInput{
+		Name: "other-owner-source", AllowedChannelIDs: []string{strconv.Itoa(otherChannel.Id)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherNotification := enqueueGatewayTestNotification(t, f.service, otherSource, &otherChannel, "logs-other")
+
+	for _, notification := range []*model.Notification{notificationA, notificationB, otherNotification} {
+		var delivery model.Delivery
+		if err := f.db.Where("notification_id = ?", notification.Id).First(&delivery).Error; err != nil {
+			t.Fatal(err)
+		}
+		attempt := model.DeliveryAttempt{
+			Id: uuid.NewString(), DeliveryID: delivery.Id, AttemptNumber: 1,
+			AttemptKind: "send", StartedAt: time.Now().UTC(), Result: model.DeliveryAccepted,
+		}
+		if err := f.db.Create(&attempt).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	engine := gin.New()
+	engine.GET("/api/v1/admin/logs", gatewayTestSessionContext(f.ownerID), ListGatewayLogs)
+	response := gatewayAPIRequest(t, engine, http.MethodGet, "/api/v1/admin/logs?page_size=100", "", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("owner log query without source_id status=%d, body=%s", response.Code, response.Body.String())
+	}
+	data := gatewayResponseData(t, response)
+	if total, _ := data["total"].(float64); total != 2 {
+		t.Fatalf("owner logs total=%v, want logs from both owned sources", data["total"])
+	}
+	items, _ := data["items"].([]interface{})
+	seenSources := map[string]bool{}
+	for _, raw := range items {
+		item, _ := raw.(map[string]interface{})
+		sourceID, _ := item["source_id"].(string)
+		seenSources[sourceID] = true
+		if sourceID == otherSource.Id {
+			t.Fatal("owner log query exposed another user's source")
+		}
+	}
+	if !seenSources[sourceA.Id] || !seenSources[sourceB.Id] {
+		t.Fatalf("owner log query omitted an owned source: %v", seenSources)
+	}
+}
+
 func TestGatewayAPIKeyAuthRequiresBearerAndScope(t *testing.T) {
 	f := newGatewayAPITestFixture(t)
 	channel := f.createChannel(t, "auth-channel", model.TypeNone, "destination")

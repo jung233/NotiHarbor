@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Button,
@@ -10,8 +10,9 @@ import {
   Segment,
   Table,
 } from 'semantic-ui-react';
-import GatewayNav from '../../components/GatewayNav';
+import MessageNav from '../../components/MessageNav';
 import { API, showError, showSuccess } from '../../helpers';
+import { isArchivedMessage, messageStatusText, useMessageRefresh } from '../../helpers/message-center';
 
 const PAGE_SIZE = 25;
 const STATUS_OPTIONS = [
@@ -54,11 +55,17 @@ const History = () => {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState([]);
+  const busy = useRef(false);
+  const requestNumber = useRef(0);
+  const [appliedFilters, setAppliedFilters] = useState(filters);
 
-  const load = async (nextPage = page, appliedFilters = filters) => {
-    setLoading(true);
+  const load = async (nextPage = page, nextFilters = filters, quiet = false) => {
+    if (quiet && busy.current) return;
+    const currentRequest = ++requestNumber.current;
+    busy.current = true;
+    if (!quiet) setLoading(true);
     try {
-      const normalizedFilters = { ...appliedFilters };
+      const normalizedFilters = { ...nextFilters };
       ['from', 'to'].forEach((field) => {
         if (normalizedFilters[field]) {
           const date = new Date(normalizedFilters[field]);
@@ -70,20 +77,25 @@ const History = () => {
           ([key, value]) => key === 'page' || key === 'page_size' || value !== ''
         )
       );
-      const response = await API.get('/api/v1/admin/notifications', { params });
+      const response = await API.get('/api/v1/admin/notifications', { params, timeout: 15000, suppressErrorToast: quiet });
+      if (currentRequest !== requestNumber.current) return;
       if (response.data?.success) {
         const result = response.data.data || {};
         setItems(result.items || []);
         setTotal(Number(result.total || 0));
         setPage(Number(result.page || nextPage));
-        setSelected([]);
+        setAppliedFilters(nextFilters);
+        setSelected((current) => current.filter((id) => (result.items || []).some((item) => item.id === id && !isArchivedMessage(item))));
       } else {
-        showError(response.data?.message || '读取消息历史失败');
+        if (!quiet) showError(response.data?.message || '读取消息失败');
       }
     } catch (error) {
       // The shared API interceptor reports transport errors.
     } finally {
-      setLoading(false);
+      if (currentRequest === requestNumber.current) {
+        busy.current = false;
+        setLoading(false);
+      }
     }
   };
 
@@ -92,6 +104,8 @@ const History = () => {
     // Initial query only; form submissions use the current filter state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useMessageRefresh(() => load(page, appliedFilters, true));
 
   const updateFilter = (name, value) => {
     setFilters((current) => ({ ...current, [name]: value }));
@@ -104,7 +118,7 @@ const History = () => {
       const response = await API.post(path, body || {});
       if (response.data?.success) {
         showSuccess(successMessage);
-        await load(page);
+        await load(page, appliedFilters);
       } else {
         showError(response.data?.message || '操作失败');
       }
@@ -116,15 +130,16 @@ const History = () => {
   };
 
   const selectAllOnPage = () => {
+    const actionable = items.filter((item) => !isArchivedMessage(item));
     setSelected((current) =>
-      current.length === items.length ? [] : items.map((item) => item.id)
+      current.length === actionable.length ? [] : actionable.map((item) => item.id)
     );
   };
 
   return (
     <Segment loading={loading}>
-      <Header as='h2'>消息历史</Header>
-      <GatewayNav />
+      <Header as='h2'>消息中心</Header>
+      <MessageNav />
       <Form
         onSubmit={(event) => {
           event.preventDefault();
@@ -132,6 +147,8 @@ const History = () => {
         }}
       >
         <Form.Group widths='equal'>
+          <Form.Input label='搜索消息' placeholder='标题或正文' value={filters.search || ''}
+            onChange={(event, { value }) => updateFilter('search', value)} />
           <Form.Input
             type='datetime-local'
             label='开始时间'
@@ -174,7 +191,7 @@ const History = () => {
             type='button'
             content='清除'
             onClick={() => {
-              const clearedFilters = { from: '', to: '', source_id: '', channel_id: '', status: '', error: '' };
+              const clearedFilters = { from: '', to: '', source_id: '', channel_id: '', status: '', error: '', search: '' };
               setFilters(clearedFilters);
               load(1, clearedFilters);
             }}
@@ -182,6 +199,7 @@ const History = () => {
         </Form.Group>
       </Form>
       <div className='gateway-actions'>
+        <Button as={Link} to='/editor' primary>发送消息</Button>
         <Button
           primary
           disabled={!selected.length}
@@ -198,7 +216,7 @@ const History = () => {
         >
           批量重试 ({selected.length})
         </Button>
-        <Button onClick={() => load(page)}>刷新</Button>
+        <Button onClick={() => load(page, appliedFilters)}>刷新</Button>
       </div>
       {!items.length && <Message info>没有符合筛选条件的消息。</Message>}
       <Table selectable stackable>
@@ -208,7 +226,8 @@ const History = () => {
               <input
                 type='checkbox'
                 aria-label='全选当前页'
-                checked={items.length > 0 && selected.length === items.length}
+                checked={selected.length > 0 && selected.length === items.filter((item) => !isArchivedMessage(item)).length}
+                disabled={!items.some((item) => !isArchivedMessage(item))}
                 onChange={selectAllOnPage}
               />
             </Table.HeaderCell>
@@ -227,6 +246,7 @@ const History = () => {
                 <input
                   type='checkbox'
                   aria-label={`选择消息 ${item.id}`}
+                  disabled={isArchivedMessage(item)}
                   checked={selected.includes(item.id)}
                   onChange={() =>
                     setSelected((current) =>
@@ -239,43 +259,14 @@ const History = () => {
               </Table.Cell>
               <Table.Cell>{item.id}</Table.Cell>
               <Table.Cell>{item.title || '无标题'}</Table.Cell>
-              <Table.Cell>{item.source_name || item.source_id || '—'}</Table.Cell>
-              <Table.Cell><Label color={statusColor(item.status)}>{item.status || 'unknown'}</Label></Table.Cell>
+              <Table.Cell>{isArchivedMessage(item) ? '历史消息' : item.source_name || item.source_id || '—'}</Table.Cell>
+              <Table.Cell><Label color={statusColor(item.status)}>{messageStatusText(item.status)}</Label></Table.Cell>
               <Table.Cell>{dateValue(item.created_at || item.timestamp)}</Table.Cell>
               <Table.Cell>
-                <Button size='small' as={Link} to={`/gateway/history/${item.id}`}>详情</Button>
-                <Button
-                  size='small'
-                  primary
-                  onClick={() => runAction(
-                    `/api/v1/admin/notifications/${item.id}/retry`,
-                    '已提交原任务重试',
-                    undefined,
-                    item.status === 'delivery_unknown'
-                      ? '发送结果未知，重试可能造成重复通知。仍要继续吗？'
-                      : null
-                  )}
-                >
-                  Retry
-                </Button>
-                <Button
-                  size='small'
-                  onClick={() => runAction(`/api/v1/admin/notifications/${item.id}/cancel`, '已取消待发送任务')}
-                >
-                  取消
-                </Button>
-                <Button
-                  size='small'
-                  color='yellow'
-                  onClick={() => runAction(
-                    `/api/v1/admin/notifications/${item.id}/resend`,
-                    '已创建新的发送任务',
-                    undefined,
-                    'Resend 会创建新的逻辑发送记录，原消息可能已被接收。仍要继续吗？'
-                  )}
-                >
-                  Resend
-                </Button>
+                <Button size='small' as={Link} to={`/message/detail/${item.id}`}>详情</Button>
+                {!isArchivedMessage(item) && (
+                  <Button size='small' as={Link} to={`/message/delivery/logs?notification_id=${encodeURIComponent(item.id)}`}>投递日志</Button>
+                )}
               </Table.Cell>
             </Table.Row>
           ))}
@@ -285,10 +276,10 @@ const History = () => {
         <Pagination
           activePage={page}
           totalPages={Math.ceil(total / PAGE_SIZE)}
-          onPageChange={(event, { activePage }) => load(Number(activePage))}
+          onPageChange={(event, { activePage }) => load(Number(activePage), appliedFilters)}
         />
       )}
-      <Message info size='small'>Retry 会重试原投递任务；Resend 会创建一条新的逻辑发送记录。</Message>
+      <Message info size='small'>每条消息只展示一次，发送和重试过程可在详情中查看。列表每 10 秒自动刷新。</Message>
     </Segment>
   );
 };

@@ -151,11 +151,11 @@ const Dashboard = () => {
               <Table.Cell>{displayTime(error.created_at || error.updated_at || error.timestamp)}</Table.Cell>
               <Table.Cell>
                 {error.notification_id ? (
-                  <Link to={`/gateway/history/${error.notification_id}`}>
+                  <Link to={`/message/detail/${error.notification_id}`}>
                     {error.title || error.notification_id}
                   </Link>
                 ) : error.delivery_id ? (
-                  <Link to={`/gateway/logs?delivery_id=${encodeURIComponent(error.delivery_id)}`}>
+                  <Link to={`/message/delivery/logs?delivery_id=${encodeURIComponent(error.delivery_id)}`}>
                     {error.title || error.delivery_id}
                   </Link>
                 ) : error.title || '—'}

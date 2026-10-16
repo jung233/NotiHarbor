@@ -620,6 +620,9 @@ func (s *Service) ListNotifications(ctx context.Context, filter NotificationFilt
 	if s == nil || s.db == nil {
 		return nil, 0, errors.New("gateway requires a database")
 	}
+	if filter.IncludeLegacyArchive {
+		return s.listNotificationsWithLegacyArchive(ctx, filter)
+	}
 	query := s.db.WithContext(ctx).Model(&model.Notification{})
 	if filter.SourceID != "" {
 		query = query.Where("gateway_notifications.source_id = ?", filter.SourceID)

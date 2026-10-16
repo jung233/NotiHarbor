@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button, Form, Header, Label, Message, Pagination, Segment, Table } from 'semantic-ui-react';
-import GatewayNav from '../../components/GatewayNav';
+import MessageNav from '../../components/MessageNav';
 import { API, showError } from '../../helpers';
 
 const PAGE_SIZE = 50;
@@ -62,10 +62,10 @@ const Logs = () => {
 
   return (
     <Segment loading={loading}>
-      <Header as='h2'>发送日志</Header>
-      <GatewayNav />
+      <Header as='h2'>投递日志</Header>
+      <MessageNav />
       <Message info size='small'>
-        日志按每次发送尝试记录，同一投递的重试会显示为多行；消息历史按逻辑通知展示。
+        每行代表一次投递尝试。点击消息 ID 可返回消息详情，查看内容及完整发送过程。
       </Message>
       <Form onSubmit={(event) => { event.preventDefault(); load(1); }}>
         <Form.Group widths='equal'>
@@ -99,7 +99,7 @@ const Logs = () => {
               <Table.Cell><Label color={item.level === 'error' || item.level === 'fatal' ? 'red' : 'grey'}>{item.level || item.type || 'info'}</Label></Table.Cell>
               <Table.Cell>{item.message || item.event || '—'}</Table.Cell>
               <Table.Cell>
-                {item.notification_id ? <Link to={`/gateway/history/${item.notification_id}`}>{item.notification_id}</Link> : '—'}
+                {item.notification_id ? <Link to={`/message/detail/${item.notification_id}`}>{item.notification_id}</Link> : '—'}
                 <br />{item.delivery_id || '—'}
                 <br />尝试 {item.attempt_number || '—'} · {attemptKindLabel(item.attempt_kind)}
                 <br />{item.attempt_id || '—'}

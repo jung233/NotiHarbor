@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useContext, useEffect } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useParams, useLocation } from 'react-router-dom';
 import Loading from './components/Loading';
 import User from './pages/User';
 import { PrivateRoute } from './components/PrivateRoute';
@@ -15,7 +15,6 @@ import GitHubOAuth from './components/GitHubOAuth';
 import PasswordResetConfirm from './components/PasswordResetConfirm';
 import { UserContext } from './context/User';
 import { StatusContext } from './context/Status';
-import Message from './pages/Message';
 import Channel from './pages/Channel';
 import EditChannel from './pages/Channel/EditChannel';
 import EditMessage from './pages/Message/EditMessage';
@@ -33,6 +32,13 @@ import GatewayLogs from './pages/Gateway/Logs';
 
 const Home = lazy(() => import('./pages/Home'));
 const About = lazy(() => import('./pages/About'));
+
+const MessageRedirect = ({ detail = false, logs = false }) => {
+  const { id } = useParams();
+  const { search } = useLocation();
+  const path = detail ? `/message/detail/${encodeURIComponent(id)}` : logs ? '/message/delivery/logs' : '/message';
+  return <Navigate replace to={`${path}${search}`} />;
+};
 
 function App() {
   const [, userDispatch] = useContext(UserContext);
@@ -184,25 +190,27 @@ function App() {
         path='/message'
         element={
           <PrivateRoute>
-            <Message />
+            <GatewayHistory />
           </PrivateRoute>
         }
       />
+      <Route path='/message/detail/:id' element={<PrivateRoute><GatewayNotificationDetail /></PrivateRoute>} />
+      <Route path='/message/delivery/logs' element={<PrivateRoute><GatewayLogs /></PrivateRoute>} />
       <Route
         path='/gateway'
         element={<AdminRoute><GatewayDashboard /></AdminRoute>}
       />
       <Route
         path='/gateway/history'
-        element={<AdminRoute><GatewayHistory /></AdminRoute>}
+        element={<PrivateRoute><MessageRedirect /></PrivateRoute>}
       />
       <Route
         path='/gateway/history/:id'
-        element={<AdminRoute><GatewayNotificationDetail /></AdminRoute>}
+        element={<PrivateRoute><MessageRedirect detail /></PrivateRoute>}
       />
       <Route
         path='/gateway/logs'
-        element={<AdminRoute><GatewayLogs /></AdminRoute>}
+        element={<PrivateRoute><MessageRedirect logs /></PrivateRoute>}
       />
       <Route
         path='/gateway/test'

@@ -164,16 +164,17 @@ type SourceInput struct {
 }
 
 type NotificationFilter struct {
-	From        *time.Time `json:"from,omitempty"`
-	To          *time.Time `json:"to,omitempty"`
-	SourceID    string     `json:"source_id,omitempty"`
-	OwnerUserID int        `json:"-"`
-	ChannelID   string     `json:"channel_id,omitempty"`
-	Status      string     `json:"status,omitempty"`
-	Error       string     `json:"error,omitempty"`
-	Search      string     `json:"search,omitempty"`
-	Page        int        `json:"page,omitempty"`
-	PageSize    int        `json:"page_size,omitempty"`
+	From                 *time.Time `json:"from,omitempty"`
+	To                   *time.Time `json:"to,omitempty"`
+	SourceID             string     `json:"source_id,omitempty"`
+	OwnerUserID          int        `json:"-"`
+	ChannelID            string     `json:"channel_id,omitempty"`
+	Status               string     `json:"status,omitempty"`
+	Error                string     `json:"error,omitempty"`
+	Search               string     `json:"search,omitempty"`
+	IncludeLegacyArchive bool       `json:"-"`
+	Page                 int        `json:"page,omitempty"`
+	PageSize             int        `json:"page_size,omitempty"`
 }
 
 type AuditFilter struct {

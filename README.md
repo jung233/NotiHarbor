@@ -98,7 +98,7 @@ flowchart LR
 
 ### 方式一：Docker Compose + 已发布镜像（推荐）
 
-项目已发布 [v0.5.1 Release](https://github.com/jung233/NotiHarbor/releases/tag/v0.5.1)，可直接拉取 **`ghcr.io/jung233/notiharbor:v0.5.1`**，无需在部署机器上编译前后端。镜像支持 **`linux/amd64` 与 `linux/arm64`**；另有持续更新的 `latest` 标签，正式部署建议固定版本。
+项目已发布 [v0.5.2 Release](https://github.com/jung233/NotiHarbor/releases/tag/v0.5.2)，可直接拉取 **`ghcr.io/jung233/notiharbor:v0.5.2`**，无需在部署机器上编译前后端。镜像支持 **`linux/amd64` 与 `linux/arm64`**；另有持续更新的 `latest` 标签，正式部署建议固定版本。
 
 你需要准备 Docker Compose v2、可用的 Redis，以及 MySQL 或 SQLite 存储。仓库的 Compose 仅启动讯港应用。MySQL、Redis 容器需接入应用使用的同一个 Docker 网络；外部服务则需确保网络可达。
 
@@ -122,7 +122,7 @@ openssl rand -base64 32
 
 | 配置 | 如何填写 |
 | --- | --- |
-| `NOTIHARBOR_IMAGE` | 改为 `ghcr.io/jung233/notiharbor:v0.5.1`，使用已发布镜像。示例文件默认的 `notiharbor:local` 用于源码构建。 |
+| `NOTIHARBOR_IMAGE` | 改为 `ghcr.io/jung233/notiharbor:v0.5.2`，使用已发布镜像。示例文件默认的 `notiharbor:local` 用于源码构建。 |
 | `DOCKER_NETWORK` | 已存在的 Docker 网络名称，例如 `notiharbor-net`。 |
 | `SQL_DSN` | MySQL 连接串：`user:password@tcp(mysql:3306)/notiharbor?charset=utf8mb4&parseTime=True&loc=UTC`。请先创建数据库并授予应用用户权限；程序只迁移表结构。 |
 | `REDIS_CONN_STRING` | Redis 地址及凭据，例如 `redis://:password@redis:6379/0`。 |
@@ -178,7 +178,7 @@ Compose 文件保留了源码构建配置，因此镜像部署时使用 `--no-bu
 不使用 Compose 时，也可以直接 `docker run`。先按上文准备 `.env`、Docker 网络和可写的 `data` 目录，再执行以下命令。此示例使用默认网络和目录；如已更改配置，请同步调整参数。
 
 ```bash
-docker pull ghcr.io/jung233/notiharbor:v0.5.1
+docker pull ghcr.io/jung233/notiharbor:v0.5.2
 
 docker run -d \
   --name notiharbor \
@@ -191,7 +191,7 @@ docker run -d \
   --env SQLITE_PATH=/data/message-pusher.db \
   --publish 127.0.0.1:3000:3000 \
   --mount "type=bind,source=$(pwd)/data,target=/data" \
-  ghcr.io/jung233/notiharbor:v0.5.1
+  ghcr.io/jung233/notiharbor:v0.5.2
 
 docker logs --tail=100 notiharbor
 curl --fail http://127.0.0.1:3000/readyz
@@ -298,7 +298,7 @@ curl --fail-with-body "$NOTIHARBOR_URL/api/v1/notifications/替换为通知ID" \
 | 同步 / 异步发送 | 支持同步发送、异步队列及 uuid 状态查询 | 保留；启用 Redis 网关后，旧异步请求也关联持久化通知与投递任务，保留原 HTTP 200 / uuid 响应。 |
 | 入站 Webhook 转换 | 提取第三方 JSON 字段，按规则构造消息并转发 | 保留规则、入口和管理界面。 |
 | 消息编辑与展示 | 网页编辑发送、Markdown / 代码 / 原始内容渲染、消息链接 | 保留；统一 API 接受文本 / Markdown，实际呈现取决于通道。 |
-| 消息历史 | 保存、搜索、查看、删除、重发及 SSE 新消息流 | 保留旧消息页；新增独立的网关历史、筛选与通知详情。 |
+| 消息历史 | 保存、搜索、查看、删除、重发及 SSE 新消息流 | 统一消息中心展示 Webhook、编辑器、旧推送接口及历史消息；按消息去重、筛选和查看投递详情，独立标签展示每次投递尝试。 |
 | 通道管理 | 创建、编辑、启停、搜索、删除、通道 token、群组组合 | 保留；新增来源通道授权及带记录的网关测试入口。 |
 | WebSocket 客户端 | 注册客户端、连接并接收推送 | 保留兼容协议。 |
 | 账号与角色 | 多用户、管理员 / 超级管理员、用户管理、个人资料、token | 保留；来源与网关资源还校验所有权，网关页面通过管理员路由进入。 |

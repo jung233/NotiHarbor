@@ -238,7 +238,8 @@ func ListGatewayNotifications(c *gin.Context) {
 	}
 	page, pageSize := gatewayPage(c)
 	sourceID, ownerUserID := gatewayNotificationScope(c)
-	if keySource, isKey := gatewayKeySource(c); isKey {
+	keySource, isKey := gatewayKeySource(c)
+	if isKey {
 		if requested := strings.TrimSpace(c.Query("source_id")); requested != "" && requested != keySource.Id {
 			gatewayFailure(c, http.StatusForbidden, "API keys can only access their own source")
 			return
@@ -254,22 +255,24 @@ func ListGatewayNotifications(c *gin.Context) {
 		}
 	}
 	if sourceID != "" && ownerUserID != 0 {
-		if _, err := service.GetSource(c.Request.Context(), ownerUserID, sourceID); err != nil {
+		if _, err := service.GetSource(c.Request.Context(), ownerUserID, sourceID); err != nil &&
+			!(errors.Is(err, gateway.ErrNotFound) && sourceID == common.LegacySourceID(ownerUserID)) {
 			gatewayLookupFailure(c, err, "source not found")
 			return
 		}
 	}
 	filter := gateway.NotificationFilter{
-		From:        from,
-		To:          to,
-		SourceID:    sourceID,
-		ChannelID:   strings.TrimSpace(c.Query("channel_id")),
-		Status:      strings.TrimSpace(c.Query("status")),
-		Error:       strings.TrimSpace(c.Query("error")),
-		Search:      strings.TrimSpace(c.Query("search")),
-		OwnerUserID: ownerUserID,
-		Page:        page,
-		PageSize:    pageSize,
+		From:                 from,
+		To:                   to,
+		SourceID:             sourceID,
+		ChannelID:            strings.TrimSpace(c.Query("channel_id")),
+		Status:               strings.TrimSpace(c.Query("status")),
+		Error:                strings.TrimSpace(c.Query("error")),
+		Search:               strings.TrimSpace(c.Query("search")),
+		OwnerUserID:          ownerUserID,
+		IncludeLegacyArchive: !isKey,
+		Page:                 page,
+		PageSize:             pageSize,
 	}
 	items, total, err := service.ListNotifications(c.Request.Context(), filter)
 	if err != nil {
@@ -284,7 +287,39 @@ func GetGatewayNotification(c *gin.Context) {
 	if !ok {
 		return
 	}
-	notification, err := gatewayGetScopedNotification(c, service, gatewayParseIDParam(c, "id"))
+	id := gatewayParseIDParam(c, "id")
+	if legacyMessageID, isArchive := gateway.ParseLegacyArchiveID(id); isArchive {
+		if _, isKey := gatewayKeySource(c); !isKey {
+			query := model.DB.WithContext(c.Request.Context()).Where("id = ?", legacyMessageID)
+			if ownerID := gatewayOwnerID(c); ownerID != 0 {
+				query = query.Where("user_id = ?", ownerID)
+			}
+			var message model.Message
+			if err := query.First(&message).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					gatewayFailure(c, http.StatusNotFound, "notification not found")
+				} else {
+					gatewayFailure(c, http.StatusInternalServerError, "gateway data could not be loaded")
+				}
+				return
+			}
+			var bridgedCount int64
+			if err := model.DB.WithContext(c.Request.Context()).Model(&model.Notification{}).
+				Where("source_id = ? AND idempotency_key = ?", common.LegacySourceID(message.UserId), "legacy:"+strconv.Itoa(message.Id)).
+				Count(&bridgedCount).Error; err != nil {
+				gatewayFailure(c, http.StatusInternalServerError, "gateway data could not be loaded")
+				return
+			}
+			if bridgedCount != 0 {
+				gatewayFailure(c, http.StatusNotFound, "notification not found")
+				return
+			}
+			notification := gateway.LegacyArchiveNotification(&message)
+			gatewaySuccess(c, http.StatusOK, gin.H{"notification": notification, "deliveries": []model.Delivery{}})
+			return
+		}
+	}
+	notification, err := gatewayGetScopedNotification(c, service, id)
 	if err != nil {
 		gatewayLookupFailure(c, err, "notification not found")
 		return
@@ -448,10 +483,6 @@ func ListGatewayLogs(c *gin.Context) {
 			return
 		}
 	}
-	if ownerUserID != 0 && sourceID == "" {
-		gatewayFailure(c, http.StatusBadRequest, "source_id is required for non-admin session log queries")
-		return
-	}
 	if sourceID != "" && ownerUserID != 0 {
 		if _, err := service.GetSource(c.Request.Context(), ownerUserID, sourceID); err != nil {
 			gatewayLookupFailure(c, err, "source not found")
@@ -528,6 +559,9 @@ func ListGatewayLogs(c *gin.Context) {
 
 func gatewayGetScopedNotification(c *gin.Context, service *gateway.Service, id string) (*model.Notification, error) {
 	if id == "" {
+		return nil, gateway.ErrNotFound
+	}
+	if _, isArchive := gateway.ParseLegacyArchiveID(id); isArchive {
 		return nil, gateway.ErrNotFound
 	}
 	if source, ok := gatewayKeySource(c); ok {

@@ -289,10 +289,10 @@ const Tester = () => {
           {(result.attempt?.error_message || result.send_error) && <p>错误详情：{result.attempt?.error_message || result.send_error}</p>}
           {(result.attempt?.retry_count ?? result.retry_count) !== undefined && <p>重试次数：{result.attempt?.retry_count ?? result.retry_count}</p>}
           {(result.notification_id || result.attempt?.notification_id) && (
-            <p><Link to={`/gateway/history/${result.notification_id || result.attempt.notification_id}`}>查看对应消息详情</Link></p>
+            <p><Link to={`/message/detail/${result.notification_id || result.attempt.notification_id}`}>查看对应消息详情</Link></p>
           )}
           {(result.attempt?.delivery_id || result.delivery_id) && (
-            <p><Link to={`/gateway/logs?delivery_id=${encodeURIComponent(result.attempt?.delivery_id || result.delivery_id)}`}>查看对应发送日志</Link></p>
+            <p><Link to={`/message/delivery/logs?delivery_id=${encodeURIComponent(result.attempt?.delivery_id || result.delivery_id)}`}>查看对应发送日志</Link></p>
           )}
           <pre className='gateway-message-content'>{JSON.stringify(result, null, 2)}</pre>
         </Segment>

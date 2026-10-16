@@ -4,8 +4,6 @@ import { Menu } from 'semantic-ui-react';
 
 const links = [
   { to: '/gateway', name: '概览' },
-  { to: '/gateway/history', name: '消息历史' },
-  { to: '/gateway/logs', name: '发送日志' },
   { to: '/gateway/test', name: '消息测试' },
   { to: '/gateway/sources', name: '应用与 API Key' },
   { to: '/gateway/targets', name: 'QQ Bot 目标' },

@@ -8,8 +8,9 @@ import {
   Segment,
   Table,
 } from 'semantic-ui-react';
-import GatewayNav from '../../components/GatewayNav';
+import MessageNav from '../../components/MessageNav';
 import { API, showError, showSuccess } from '../../helpers';
+import { isArchivedMessage, messageStatusText, useMessageRefresh } from '../../helpers/message-center';
 
 const timeValue = (value) => {
   if (!value) return '—';
@@ -31,14 +32,15 @@ const NotificationDetail = () => {
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       const notificationResponse = await API.get(
-        `/api/v1/admin/notifications/${encodeURIComponent(id)}`
+        `/api/v1/admin/notifications/${encodeURIComponent(id)}`,
+        { timeout: 15000, suppressErrorToast: quiet }
       );
       if (!notificationResponse.data?.success) {
-        showError(notificationResponse.data?.message || '读取消息详情失败');
+        if (!quiet) showError(notificationResponse.data?.message || '读取消息详情失败');
         return;
       }
       const detail = readData(notificationResponse);
@@ -47,7 +49,8 @@ const NotificationDetail = () => {
         deliveryList.map(async (delivery) => {
           try {
             const attemptsResponse = await API.get(
-              `/api/v1/admin/notifications/${encodeURIComponent(id)}/deliveries/${encodeURIComponent(delivery.id)}/attempts`
+              `/api/v1/admin/notifications/${encodeURIComponent(id)}/deliveries/${encodeURIComponent(delivery.id)}/attempts`,
+              { timeout: 15000, suppressErrorToast: quiet }
             );
             const attemptData = readData(attemptsResponse);
             return {
@@ -68,7 +71,7 @@ const NotificationDetail = () => {
     } catch (error) {
       // The shared API interceptor reports transport errors.
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   };
 
@@ -77,6 +80,8 @@ const NotificationDetail = () => {
     // Reload when the selected notification changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useMessageRefresh(() => load(true));
 
   const runAction = async (action, message) => {
     if (action === 'resend' && !window.confirm('Resend 会创建新的逻辑发送记录，原消息可能已被接收。仍要继续吗？')) return;
@@ -110,22 +115,25 @@ const NotificationDetail = () => {
   return (
     <Segment loading={loading}>
       <Header as='h2'>消息详情</Header>
-      <GatewayNav />
-      <p><Link to='/gateway/history'>返回消息历史</Link></p>
+      <MessageNav />
+      <p><Link to='/message'>返回全部消息</Link></p>
       {!notification ? (
         <Message info>正在读取消息记录。</Message>
       ) : (
         <>
           <div className='gateway-actions'>
-            <Button primary onClick={() => runAction('retry', '已提交原任务重试')}>Retry 原任务</Button>
+            {!isArchivedMessage(notification) && <>
+            <Button primary onClick={() => runAction('retry', '已提交原任务重试')}>重试原任务</Button>
             <Button onClick={() => runAction('cancel', '已取消待发送任务')}>取消待发送</Button>
-            <Button color='yellow' onClick={() => runAction('resend', '已创建新的逻辑发送任务')}>Resend 新发送</Button>
-            <Button onClick={load}>刷新</Button>
+            <Button color='yellow' onClick={() => runAction('resend', '已创建新的逻辑发送任务')}>再次发送</Button>
+            <Button as={Link} to={`/message/delivery/logs?notification_id=${encodeURIComponent(id)}`}>查看投递日志</Button>
+            </>}
+            <Button onClick={() => load()}>刷新</Button>
           </div>
           <Table definition stackable>
             <Table.Body>
               <Table.Row><Table.Cell>ID</Table.Cell><Table.Cell>{notification.id}</Table.Cell></Table.Row>
-              <Table.Row><Table.Cell>状态</Table.Cell><Table.Cell><Label>{notification.status || 'unknown'}</Label></Table.Cell></Table.Row>
+              <Table.Row><Table.Cell>状态</Table.Cell><Table.Cell><Label>{messageStatusText(notification.status)}</Label></Table.Cell></Table.Row>
               <Table.Row><Table.Cell>标题</Table.Cell><Table.Cell>{notification.title || '无标题'}</Table.Cell></Table.Row>
               <Table.Row><Table.Cell>正文</Table.Cell><Table.Cell><pre className='gateway-message-content'>{notification.content || '—'}</pre></Table.Cell></Table.Row>
               <Table.Row><Table.Cell>来源</Table.Cell><Table.Cell>{notification.source_name || notification.source_id || '—'}</Table.Cell></Table.Row>
@@ -137,13 +145,13 @@ const NotificationDetail = () => {
           </Table>
 
           <Header as='h3' dividing>投递与发送尝试</Header>
-          {!deliveries.length && <Message info>此消息目前没有投递记录。</Message>}
+          {!deliveries.length && <Message info>{isArchivedMessage(notification) ? '此消息发送于投递日志启用之前，已保留原始内容和状态。' : '此消息目前没有投递记录。'}</Message>}
           {deliveries.map((delivery) => (
             <Segment key={delivery.id}>
               <Header as='h4'>
                 {delivery.channel_name || delivery.channel_id || '通道'}
                 {' '}
-                <Label>{delivery.status || 'unknown'}</Label>
+                <Label>{messageStatusText(delivery.status)}</Label>
               </Header>
               <p>
                 Delivery ID: {delivery.id} · 目标: {delivery.target_name || delivery.target?.name || maskTarget(delivery.target_id || delivery.target?.external_id)} ·
@@ -171,7 +179,7 @@ const NotificationDetail = () => {
                       <Table.Cell>{attempt.attempt_number ?? attempt.number ?? '—'}</Table.Cell>
                       <Table.Cell>{timeValue(attempt.started_at)}</Table.Cell>
                       <Table.Cell>{attempt.duration_ms ?? '—'} ms</Table.Cell>
-                      <Table.Cell>{attempt.result || attempt.status || '—'}</Table.Cell>
+                      <Table.Cell>{messageStatusText(attempt.result || attempt.status)}</Table.Cell>
                       <Table.Cell>{attempt.error_category || '—'}</Table.Cell>
                       <Table.Cell>{attempt.http_status ?? '—'} / {attempt.provider_error_code || attempt.error_code || '—'}</Table.Cell>
                       <Table.Cell>{attempt.provider_message_id || '—'}</Table.Cell>
