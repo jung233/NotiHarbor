@@ -98,7 +98,7 @@ flowchart LR
 
 ### 方式一：Docker Compose + 已发布镜像（推荐）
 
-项目已发布 [v0.5.0 Release](https://github.com/jung233/NotiHarbor/releases/tag/v0.5.0)，可直接拉取 **`ghcr.io/jung233/notiharbor:v0.5.0`**，无需在部署机器上编译前后端。镜像支持 **`linux/amd64` 与 `linux/arm64`**；另有持续更新的 `latest` 标签，正式部署建议固定版本。
+项目已发布 [v0.5.1 Release](https://github.com/jung233/NotiHarbor/releases/tag/v0.5.1)，可直接拉取 **`ghcr.io/jung233/notiharbor:v0.5.1`**，无需在部署机器上编译前后端。镜像支持 **`linux/amd64` 与 `linux/arm64`**；另有持续更新的 `latest` 标签，正式部署建议固定版本。
 
 你需要准备 Docker Compose v2、可用的 Redis，以及 MySQL 或 SQLite 存储。仓库的 Compose 仅启动讯港应用。MySQL、Redis 容器需接入应用使用的同一个 Docker 网络；外部服务则需确保网络可达。
 
@@ -122,7 +122,7 @@ openssl rand -base64 32
 
 | 配置 | 如何填写 |
 | --- | --- |
-| `NOTIHARBOR_IMAGE` | 改为 `ghcr.io/jung233/notiharbor:v0.5.0`，使用已发布镜像。示例文件默认的 `notiharbor:local` 用于源码构建。 |
+| `NOTIHARBOR_IMAGE` | 改为 `ghcr.io/jung233/notiharbor:v0.5.1`，使用已发布镜像。示例文件默认的 `notiharbor:local` 用于源码构建。 |
 | `DOCKER_NETWORK` | 已存在的 Docker 网络名称，例如 `notiharbor-net`。 |
 | `SQL_DSN` | MySQL 连接串：`user:password@tcp(mysql:3306)/notiharbor?charset=utf8mb4&parseTime=True&loc=UTC`。请先创建数据库并授予应用用户权限；程序只迁移表结构。 |
 | `REDIS_CONN_STRING` | Redis 地址及凭据，例如 `redis://:password@redis:6379/0`。 |
@@ -178,7 +178,7 @@ Compose 文件保留了源码构建配置，因此镜像部署时使用 `--no-bu
 不使用 Compose 时，也可以直接 `docker run`。先按上文准备 `.env`、Docker 网络和可写的 `data` 目录，再执行以下命令。此示例使用默认网络和目录；如已更改配置，请同步调整参数。
 
 ```bash
-docker pull ghcr.io/jung233/notiharbor:v0.5.0
+docker pull ghcr.io/jung233/notiharbor:v0.5.1
 
 docker run -d \
   --name notiharbor \
@@ -191,7 +191,7 @@ docker run -d \
   --env SQLITE_PATH=/data/message-pusher.db \
   --publish 127.0.0.1:3000:3000 \
   --mount "type=bind,source=$(pwd)/data,target=/data" \
-  ghcr.io/jung233/notiharbor:v0.5.0
+  ghcr.io/jung233/notiharbor:v0.5.1
 
 docker logs --tail=100 notiharbor
 curl --fail http://127.0.0.1:3000/readyz
