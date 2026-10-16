@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Button,
@@ -51,9 +51,6 @@ const Tester = () => {
         const items = response.data.data?.items || response.data.data || [];
         const activeChannels = items.filter((channel) => channel.enabled !== false && channel.status !== 2);
         setChannels(activeChannels);
-        if (!channelId && activeChannels.length) {
-          setChannelId(String(activeChannels[0].id));
-        }
       } else {
         showError(response.data?.message || '读取通道列表失败');
       }
@@ -106,8 +103,23 @@ const Tester = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceId]);
 
+  const selectedSource = sources.find((source) => String(source.id) === String(sourceId));
+  const availableChannels = useMemo(() => {
+    const allowedIds = (selectedSource?.allowed_channel_ids || []).map(String);
+    return selectedSource?.status === 'active'
+      ? channels.filter((channel) => allowedIds.includes(String(channel.id)))
+      : [];
+  }, [selectedSource, channels]);
+
+  useEffect(() => {
+    if (!availableChannels.some((channel) => String(channel.id) === channelId)) {
+      setChannelId(availableChannels.length ? String(availableChannels[0].id) : '');
+      setTargetId('');
+    }
+  }, [availableChannels, channelId]);
+
   const submit = async () => {
-    if (!sourceId || !channelId || !inputs.content.trim()) {
+    if (!sourceId || !availableChannels.some((channel) => String(channel.id) === channelId) || !inputs.content.trim()) {
       showError('请选择所属应用与通道，并填写消息正文');
       return;
     }
@@ -126,10 +138,10 @@ const Tester = () => {
         }
       );
       setResult(response.data?.data || response.data);
-      if (response.data?.success) {
+      if (response.data?.success && !response.data?.data?.send_error && response.data?.data?.attempt?.result !== 'failed') {
         showSuccess('测试请求已提交');
       } else {
-        showError(response.data?.message || '测试发送失败');
+        showError(response.data?.data?.send_error || response.data?.message || '测试发送失败');
       }
     } catch (error) {
       setResult(error.response?.data?.data || error.response?.data || { message: error.message });
@@ -138,7 +150,7 @@ const Tester = () => {
     }
   };
 
-  const channelOptions = channels.map((channel) => ({
+  const channelOptions = availableChannels.map((channel) => ({
     key: channel.id,
     value: String(channel.id),
     text: `${channel.name || channel.channel_name || channel.id} (${channel.type || 'channel'})`,
@@ -174,6 +186,7 @@ const Tester = () => {
       </Message>
       {!sources.length && <Message info>尚无上游应用。请先在「应用与 API Key」中创建应用，再选择它运行测试。</Message>}
       {!channels.length && <Message info>没有可用通道。请先在通道管理中配置通道。</Message>}
+      {selectedSource && !availableChannels.length && <Message warning>当前应用没有可用的授权通道。请在<Link to='/gateway/sources'>应用与 API Key</Link>中为此应用授权通道。</Message>}
       <Form onSubmit={(event) => { event.preventDefault(); submit(); }}>
         <Form.Group widths='equal'>
           <Form.Select
@@ -261,7 +274,7 @@ const Tester = () => {
           onChange={(event, { value }) => setInputs({ ...inputs, content: value })}
           style={{ minHeight: 180 }}
         />
-        <Button primary type='submit' disabled={!sourceId || !channelId} loading={loading}>
+        <Button primary type='submit' disabled={!sourceId || !availableChannels.some((channel) => String(channel.id) === channelId)} loading={loading}>
           发送测试消息
         </Button>
       </Form>
@@ -270,6 +283,9 @@ const Tester = () => {
           <Header as='h3'>发送结果</Header>
           {(result.attempt?.duration_ms ?? result.duration_ms) !== undefined && <p>耗时：{result.attempt?.duration_ms ?? result.duration_ms} ms</p>}
           {(result.attempt?.provider_error_code || result.error_code) && <p>错误码：{result.attempt?.provider_error_code || result.error_code}</p>}
+          {String(result.attempt?.provider_error_code || result.error_code) === '40011028' && (
+            <Message warning>QQ 平台拒绝了当前目标。请核对目标是否来自此 AppID 的回调、私聊与群聊类型是否正确，以及用户或群是否已添加此机器人；其他机器人的 OpenID 不能直接复用。</Message>
+          )}
           {(result.attempt?.error_message || result.send_error) && <p>错误详情：{result.attempt?.error_message || result.send_error}</p>}
           {(result.attempt?.retry_count ?? result.retry_count) !== undefined && <p>重试次数：{result.attempt?.retry_count ?? result.retry_count}</p>}
           {(result.notification_id || result.attempt?.notification_id) && (

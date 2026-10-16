@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { UserContext } from '../context/User';
 
 import { Button, Container, Dropdown, Icon, Menu, Segment } from 'semantic-ui-react';
-import { API, isAdmin, isMobile, showSuccess } from '../helpers';
+import { API, isMobile, showSuccess } from '../helpers';
 import '../index.css';
 
 // Header Buttons
@@ -17,6 +17,7 @@ const headerButtons = [
     name: '消息',
     to: '/message',
     icon: 'mail',
+    authenticated: true,
   },
   {
     name: '网关',
@@ -28,16 +29,19 @@ const headerButtons = [
     name: '编辑',
     to: '/editor',
     icon: 'edit',
+    authenticated: true,
   },
   {
     name: '通道',
     to: '/channel',
     icon: 'sitemap',
+    authenticated: true,
   },
   {
     name: '接口',
     to: '/webhook',
     icon: 'code',
+    authenticated: true,
   },
   {
     name: '用户',
@@ -49,6 +53,7 @@ const headerButtons = [
     name: '设置',
     to: '/setting',
     icon: 'setting',
+    authenticated: true,
   },
   {
     name: '关于',
@@ -59,7 +64,9 @@ const headerButtons = [
 
 const Header = () => {
   const [userState, userDispatch] = useContext(UserContext);
-  let navigate = useNavigate();
+  const navigate = useNavigate();
+  const isAuthenticated = Boolean(userState.user);
+  const isAdminUser = Number(userState.user?.role) >= 10;
 
   const [showSidebar, setShowSidebar] = useState(false);
 
@@ -83,10 +90,12 @@ const Header = () => {
 
   const renderButtons = (isMobile) => {
     return headerButtons.map((button) => {
-      if (button.admin && !isAdmin()) return <></>;
+      if (button.authenticated && !isAuthenticated) return null;
+      if (button.admin && !isAdminUser) return null;
       if (isMobile) {
         return (
           <Menu.Item
+            key={button.name}
             onClick={() => {
               navigate(button.to);
               setShowSidebar(false);
@@ -145,7 +154,7 @@ const Header = () => {
             <Menu secondary vertical style={{ width: '100%', margin: 0 }}>
               {renderButtons(true)}
               <Menu.Item>
-                {userState.user ? (
+                {isAuthenticated ? (
                   <Button onClick={logout}>注销</Button>
                 ) : (
                   <>
@@ -189,7 +198,7 @@ const Header = () => {
           </Menu.Item>
           {renderButtons(false)}
           <Menu.Menu position='right'>
-            {userState.user ? (
+            {isAuthenticated ? (
               <Dropdown
                 text={userState.user.username}
                 pointing
@@ -200,12 +209,10 @@ const Header = () => {
                 </Dropdown.Menu>
               </Dropdown>
             ) : (
-              <Menu.Item
-                name='登录'
-                as={Link}
-                to='/login'
-                className='btn btn-link'
-              />
+              <>
+                <Menu.Item name='登录' as={Link} to='/login' />
+                <Menu.Item name='注册' as={Link} to='/register' />
+              </>
             )}
           </Menu.Menu>
         </Container>

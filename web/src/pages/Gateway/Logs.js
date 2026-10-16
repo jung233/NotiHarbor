@@ -12,6 +12,11 @@ const timeValue = (value) => {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 };
 
+const attemptKindLabel = (kind) => ({
+  send: '发送',
+  preflight: '发送前校验',
+}[kind] || kind || '—');
+
 const Logs = () => {
   const [searchParams] = useSearchParams();
   const [filters, setFilters] = useState({
@@ -59,6 +64,9 @@ const Logs = () => {
     <Segment loading={loading}>
       <Header as='h2'>发送日志</Header>
       <GatewayNav />
+      <Message info size='small'>
+        日志按每次发送尝试记录，同一投递的重试会显示为多行；消息历史按逻辑通知展示。
+      </Message>
       <Form onSubmit={(event) => { event.preventDefault(); load(1); }}>
         <Form.Group widths='equal'>
           {Object.keys(filters).map((field) => (
@@ -92,7 +100,9 @@ const Logs = () => {
               <Table.Cell>{item.message || item.event || '—'}</Table.Cell>
               <Table.Cell>
                 {item.notification_id ? <Link to={`/gateway/history/${item.notification_id}`}>{item.notification_id}</Link> : '—'}
-                <br />{item.delivery_id || '—'}<br />{item.attempt_id || '—'}
+                <br />{item.delivery_id || '—'}
+                <br />尝试 {item.attempt_number || '—'} · {attemptKindLabel(item.attempt_kind)}
+                <br />{item.attempt_id || '—'}
               </Table.Cell>
               <Table.Cell>{item.source_id || '—'} / {item.channel_name || item.channel_id || '—'}</Table.Cell>
               <Table.Cell>{item.error_code || item.error_category || item.error_message || '—'}</Table.Cell>

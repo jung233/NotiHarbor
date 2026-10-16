@@ -17,6 +17,7 @@ import {
   showWarning,
   sanitizeHTML,
 } from '../helpers';
+import { connectMessageStream } from '../helpers/message-stream';
 
 import { ITEMS_PER_PAGE } from '../constants';
 import { renderTimestamp } from '../helpers/render';
@@ -77,20 +78,34 @@ const MessagesTable = () => {
 
   const loadMessages = async (startIdx) => {
     setLoading(true);
-    const res = await API.get(`/api/message/?p=${startIdx}`);
-    const { success, message, data } = res.data;
-    if (success) {
-      if (startIdx === 0) {
-        setMessages(data);
+    try {
+      const res = await API.get(`/api/message/?p=${startIdx}`);
+      const { success, message, data } = res.data;
+      if (success) {
+        const fetchedMessages = data || [];
+        if (startIdx === 0) {
+          setMessages(fetchedMessages);
+        } else {
+          setMessages((currentMessages) => {
+            const existingIds = new Set(
+              currentMessages.map((currentMessage) => currentMessage.id)
+            );
+            return [
+              ...currentMessages,
+              ...fetchedMessages.filter(
+                (fetchedMessage) => !existingIds.has(fetchedMessage.id)
+              ),
+            ];
+          });
+        }
       } else {
-        let newMessages = messages;
-        newMessages.push(...data);
-        setMessages(newMessages);
+        showError(message);
       }
-    } else {
-      showError(message);
+    } catch {
+      // The shared API interceptor reports transport errors.
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const onPaginationChange = (e, { activePage }) => {
@@ -104,53 +119,45 @@ const MessagesTable = () => {
   };
 
   const checkPermission = async () => {
-    // Check global permission
-    let res = await API.get('/api/status');
-    const { success, data } = res.data;
-    if (success) {
-      if (data.message_persistence) {
+    try {
+      // Check global permission
+      let res = await API.get('/api/status');
+      const { success, data } = res.data;
+      if (success && data.message_persistence) {
         return;
       }
-    }
-    // Check user permission
-    {
-      let res = await API.get('/api/user/self');
-      const { success, message, data } = res.data;
-      if (success) {
-        if (data.save_message_to_database !== 1) {
-          showWarning('您没有消息持久化的权限，消息未保存，请联系管理员。');
+      // Check user permission
+      {
+        res = await API.get('/api/user/self');
+        const { success, message, data } = res.data;
+        if (success) {
+          if (data.save_message_to_database !== 1) {
+            showWarning('您没有消息持久化的权限，消息未保存，请联系管理员。');
+          }
+        } else {
+          showError(message);
         }
-      } else {
-        showError(message);
       }
+    } catch {
+      // The shared API interceptor reports transport errors.
     }
   };
 
   useEffect(() => {
-    loadMessages(0)
-      .then()
-      .catch((reason) => {
-        showError(reason);
-      });
+    loadMessages(0).then();
     checkPermission().then();
-    const connectEventSource = () => {
-      const eventSource = new EventSource('/api/message/stream');
-      eventSource.onmessage = (e) => {
-        const newMessage = JSON.parse(e.data);
-        insertNewMessage(newMessage);
-      };
-      eventSource.onerror = () => {
-        showError('服务端消息推送流连接出错！即将重试...');
-        eventSource.close();
-        setTimeout(connectEventSource, 1000); // 1000ms
-      };
-      return eventSource;
-    };
-    const eventSource = connectEventSource();
-    showInfo('服务器消息推送流已连接，您将实时收到新消息');
-    return () => {
-      eventSource.close();
-    };
+    return connectMessageStream(
+      API.getUri({ url: '/api/message/stream' }),
+      insertNewMessage,
+      {
+        onOpen: ({ reconnected }) => {
+          if (!reconnected) {
+            showInfo('服务器消息推送流已连接，您将实时收到新消息');
+          }
+        },
+        onError: () => showWarning('消息推送流暂时中断，正在重试...'),
+      }
+    );
   }, []);
 
   const viewMessage = async (id) => {
@@ -232,11 +239,14 @@ const MessagesTable = () => {
   };
 
   const insertNewMessage = (message) => {
-    console.log(messages);
-    setMessages((messages) => {
-      let newMessages = [message];
-      newMessages.push(...messages);
-      return newMessages;
+    setMessages((currentMessages) => {
+      if (!message.id) return [message, ...currentMessages];
+      return [
+        message,
+        ...currentMessages.filter(
+          (currentMessage) => currentMessage.id !== message.id
+        ),
+      ];
     });
     setActivePage(1);
   };

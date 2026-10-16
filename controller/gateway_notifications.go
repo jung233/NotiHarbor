@@ -476,6 +476,8 @@ func ListGatewayLogs(c *gin.Context) {
 		NotificationID string    `json:"notification_id"`
 		DeliveryID     string    `json:"delivery_id"`
 		AttemptID      string    `json:"attempt_id"`
+		AttemptNumber  int       `json:"attempt_number"`
+		AttemptKind    string    `json:"attempt_kind"`
 		SourceID       string    `json:"source_id"`
 		ChannelID      string    `json:"channel_id"`
 		Level          string    `json:"level"`
@@ -507,7 +509,7 @@ func ListGatewayLogs(c *gin.Context) {
 		return
 	}
 	var items []gatewayLogRow
-	if err := query.Select("a.id AS id, a.created_at AS created_at, n.id AS notification_id, d.id AS delivery_id, a.id AS attempt_id, n.source_id AS source_id, d.channel_id AS channel_id, a.result AS result, a.error_message AS message, a.provider_error_code AS error_code").
+	if err := query.Select("a.id AS id, a.created_at AS created_at, n.id AS notification_id, d.id AS delivery_id, a.id AS attempt_id, a.attempt_number AS attempt_number, a.attempt_kind AS attempt_kind, n.source_id AS source_id, d.channel_id AS channel_id, a.result AS result, a.error_message AS message, a.provider_error_code AS error_code").
 		Distinct().Order("a.created_at DESC").Limit(pageSize).Offset((page - 1) * pageSize).Scan(&items).Error; err != nil {
 		gatewayFailure(c, http.StatusInternalServerError, "delivery logs could not be loaded")
 		return

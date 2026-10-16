@@ -95,33 +95,33 @@ function App() {
       <Route
         path='/user'
         element={
-          <PrivateRoute>
+          <AdminRoute>
             <User />
-          </PrivateRoute>
+          </AdminRoute>
         }
       />
       <Route
         path='/user/edit/:id'
         element={
-          <Suspense fallback={<Loading></Loading>}>
+          <AdminRoute>
             <EditUser />
-          </Suspense>
+          </AdminRoute>
         }
       />
       <Route
         path='/user/edit'
         element={
-          <Suspense fallback={<Loading></Loading>}>
+          <PrivateRoute>
             <EditUser />
-          </Suspense>
+          </PrivateRoute>
         }
       />
       <Route
         path='/user/add'
         element={
-          <Suspense fallback={<Loading></Loading>}>
+          <AdminRoute>
             <AddUser />
-          </Suspense>
+          </AdminRoute>
         }
       />
       <Route
@@ -143,17 +143,17 @@ function App() {
       <Route
         path='/channel/edit/:id'
         element={
-          <Suspense fallback={<Loading></Loading>}>
+          <PrivateRoute>
             <EditChannel />
-          </Suspense>
+          </PrivateRoute>
         }
       />
       <Route
         path='/channel/add'
         element={
-          <Suspense fallback={<Loading></Loading>}>
+          <PrivateRoute>
             <EditChannel />
-          </Suspense>
+          </PrivateRoute>
         }
       />
       <Route
@@ -167,17 +167,17 @@ function App() {
       <Route
         path='/webhook/edit/:id'
         element={
-          <Suspense fallback={<Loading></Loading>}>
+          <PrivateRoute>
             <EditWebhook />
-          </Suspense>
+          </PrivateRoute>
         }
       />
       <Route
         path='/webhook/add'
         element={
-          <Suspense fallback={<Loading></Loading>}>
+          <PrivateRoute>
             <EditWebhook />
-          </Suspense>
+          </PrivateRoute>
         }
       />
       <Route
@@ -282,7 +282,7 @@ function App() {
           </Suspense>
         }
       />
-      <Route path='*' element={NotFound} />
+      <Route path='*' element={<NotFound />} />
     </Routes>
   );
 }

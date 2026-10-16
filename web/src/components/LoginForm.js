@@ -10,7 +10,7 @@ import {
   Modal,
   Segment,
 } from 'semantic-ui-react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { UserContext } from '../context/User';
 import { API, openPage, showError, showSuccess } from '../helpers';
 
@@ -20,11 +20,11 @@ const LoginForm = () => {
     password: '',
     wechat_verification_code: '',
   });
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [submitted, setSubmitted] = useState(false);
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
   const { username, password } = inputs;
-  const [userState, userDispatch] = useContext(UserContext);
-  let navigate = useNavigate();
+  const [, userDispatch] = useContext(UserContext);
+  const navigate = useNavigate();
 
   const [status, setStatus] = useState({});
 
@@ -37,7 +37,7 @@ const LoginForm = () => {
       status = JSON.parse(status);
       setStatus(status);
     }
-  }, []);
+  }, [searchParams]);
 
   const [showWeChatLoginModal, setShowWeChatLoginModal] = useState(false);
 
@@ -60,7 +60,7 @@ const LoginForm = () => {
     if (success) {
       userDispatch({ type: 'login', payload: data });
       localStorage.setItem('user', JSON.stringify(data));
-      navigate('/');
+      navigate(location.state?.from || '/', { replace: true });
       showSuccess('登录成功！');
       setShowWeChatLoginModal(false);
     } else {
@@ -74,7 +74,6 @@ const LoginForm = () => {
   }
 
   async function handleSubmit(e) {
-    setSubmitted(true);
     if (username && password) {
       const res = await API.post('/api/user/login', {
         username,
@@ -84,7 +83,7 @@ const LoginForm = () => {
       if (success) {
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
-        navigate('/');
+        navigate(location.state?.from || '/', { replace: true });
         showSuccess('登录成功！');
       } else {
         showError(message);

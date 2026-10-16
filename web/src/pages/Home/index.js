@@ -1,10 +1,13 @@
 import React, { useContext, useEffect } from 'react';
-import { Card, Grid, Header, Segment } from 'semantic-ui-react';
+import { Link } from 'react-router-dom';
+import { Button, Card, Grid, Header, Segment } from 'semantic-ui-react';
 import { API, safeHttpURL, showError, showNotice, timestamp2string } from '../../helpers';
 import { StatusContext } from '../../context/Status';
+import { UserContext } from '../../context/User';
 
 const Home = () => {
-  const [statusState, statusDispatch] = useContext(StatusContext);
+  const [statusState] = useContext(StatusContext);
+  const [userState] = useContext(UserContext);
   const homePageLink = safeHttpURL(localStorage.getItem('home_page_link') || '');
 
   const displayNotice = async () => {
@@ -27,8 +30,30 @@ const Home = () => {
   };
 
   useEffect(() => {
-    displayNotice().then();
-  }, []);
+    if (userState.sessionReady && userState.user) {
+      displayNotice().catch(showError);
+    }
+  }, [userState.sessionReady, userState.user]);
+
+  if (!userState.user) {
+    return (
+      <Segment textAlign='center' style={{ marginTop: '2em', padding: '3em 1em' }}>
+        <Header as='h1'>NotiHarbor 讯港</Header>
+        <p>
+          <strong>A Reliable, Self-Hosted Notification Gateway</strong>
+          {' / 可靠、自托管的统一消息通知网关'}
+        </p>
+        <p>登录后管理消息、通道和通知接口。</p>
+        <Button as={Link} to='/login' primary>
+          登录
+        </Button>
+        <Button as={Link} to='/register'>
+          注册
+        </Button>
+      </Segment>
+    );
+  }
+
   return (
     <>
       {homePageLink !== '' ? (
