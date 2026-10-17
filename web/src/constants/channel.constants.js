@@ -1,5 +1,5 @@
 export const CHANNEL_OPTIONS = [
-  { key: 'email', text: '邮件', value: 'email', color: '#4285f4' },
+  { key: 'email', text: 'SMTP 邮件', value: 'email', color: '#4285f4' },
   { key: 'test', text: '微信测试号', value: 'test', color: '#2cbb00' },
   {
     key: 'corp_app',

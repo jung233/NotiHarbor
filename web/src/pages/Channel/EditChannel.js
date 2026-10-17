@@ -26,6 +26,15 @@ const EditChannel = () => {
   };
 
   const [inputs, setInputs] = useState(originInputs);
+  const smtpDefaults = {
+    tls_mode: '',
+    timeout_seconds: 30,
+    html: true,
+    from_name: '',
+    from_address: '',
+  };
+  const [smtpConfig, setSmtpConfig] = useState(smtpDefaults);
+  const [smtpConfigError, setSmtpConfigError] = useState(false);
   const [qqConfig, setQqConfig] = useState({
     bot_name: '',
     default_target: '',
@@ -71,6 +80,23 @@ const EditChannel = () => {
           showError('QQ Bot 配置格式无效，保存前请检查配置');
         }
       }
+      if (data.type === 'email') {
+        try {
+          const savedConfig = JSON.parse(data.other || '{}');
+          if (!savedConfig || Array.isArray(savedConfig) || typeof savedConfig !== 'object') {
+            throw new Error('invalid SMTP configuration');
+          }
+          setSmtpConfig({
+            ...smtpDefaults,
+            ...savedConfig,
+            timeout_seconds: savedConfig.timeout_seconds || 30,
+            html: savedConfig.html !== false,
+          });
+        } catch (error) {
+          setSmtpConfigError(true);
+          showError('SMTP 配置格式无效，请修复后再保存');
+        }
+      }
       setInputs(data);
     } else {
       showError(message);
@@ -89,6 +115,37 @@ const EditChannel = () => {
     if (!name) return;
     let res = undefined;
     let localInputs = { ...inputs };
+    if (inputs.type === 'email') {
+      if (smtpConfigError) {
+        showError('SMTP 配置格式无效，请先通过 API 修复原有配置');
+        return;
+      }
+      localInputs.url = String(inputs.url || '').trim();
+      localInputs.app_id = String(inputs.app_id || '').trim();
+      localInputs.account_id = String(inputs.account_id || '').trim();
+      const customSMTP = localInputs.url || localInputs.app_id || localInputs.account_id || localInputs.secret;
+      if (customSMTP && (!localInputs.url || !localInputs.app_id || (!isEditing && !localInputs.secret))) {
+        showError('独立 SMTP 通道请填写服务器、账号和密码／授权码');
+        return;
+      }
+      if (customSMTP && smtpConfig.tls_mode === 'none') {
+        showError('SMTP 账号认证需要使用 TLS 或 STARTTLS');
+        return;
+      }
+      if (localInputs.url && /[\s/:\\@[\]]/.test(localInputs.url)) {
+        showError('SMTP 服务器请填写主机名，不要包含协议、端口或路径');
+        return;
+      }
+      if (localInputs.account_id && (!/^\d+$/.test(localInputs.account_id) || Number(localInputs.account_id) < 1 || Number(localInputs.account_id) > 65535)) {
+        showError('SMTP 端口需为 1–65535 的整数');
+        return;
+      }
+      if (!Number.isInteger(smtpConfig.timeout_seconds) || smtpConfig.timeout_seconds < 1 || smtpConfig.timeout_seconds > 120) {
+        showError('SMTP 超时需为 1–120 秒的整数');
+        return;
+      }
+      localInputs.other = JSON.stringify(smtpConfig);
+    }
     if (inputs.type === 'qqbot_v2') {
       if (qqConfig.delivery_mode === 'wakeup' && qqConfig.target_type !== 'user') {
         showError('互动召回仅支持 C2C 私聊目标');
@@ -181,6 +238,7 @@ const EditChannel = () => {
       } else {
         showSuccess('通道创建成功！');
         setInputs(originInputs);
+        setSmtpConfig(smtpDefaults);
       }
     } else {
       showError(message);
@@ -216,9 +274,32 @@ const EditChannel = () => {
       case 'email':
         return (
           <>
-            <Message>
-              邮件推送方式（email）需要设置邮箱，请前往个人设置页面绑定邮箱地址，之后系统将自动为你创建邮箱推送通道。
+            <Message info>
+              通过 SMTP 发送消息邮件。填写下方信息可使用独立 SMTP 服务器；连接信息全部留空则使用系统 SMTP。
+              默认发送到个人设置中绑定的邮箱，也可在推送请求中指定收件人（受发信权限控制）。
             </Message>
+            <Form.Group widths='equal'>
+              <Form.Input label='SMTP 服务器' name='url' value={url} onChange={handleInputChange} placeholder='例如 smtp.example.com，不含协议和端口' />
+              <Form.Input label='SMTP 端口' name='account_id' value={account_id} onChange={handleInputChange} type='number' min='1' max='65535' placeholder='留空使用系统端口，通常为 587 或 465' />
+            </Form.Group>
+            <Form.Group widths='equal'>
+              <Form.Input label='SMTP 账号' name='app_id' value={app_id} onChange={handleInputChange} autoComplete='off' placeholder='通常为发件邮箱地址' />
+              <Form.Input label='SMTP 密码／授权码' name='secret' value={secret} onChange={handleInputChange} type='password' autoComplete='new-password' placeholder={isEditing ? '留空保留已保存凭证' : '输入邮箱密码或应用授权码'} />
+            </Form.Group>
+            <Form.Group widths='equal'>
+              <Form.Select label='连接安全' value={smtpConfig.tls_mode} options={[
+                { key: 'auto', value: '', text: '自动（465 使用 TLS，其他端口使用 STARTTLS）' },
+                { key: 'tls', value: 'tls', text: 'TLS' },
+                { key: 'starttls', value: 'starttls', text: 'STARTTLS' },
+                { key: 'none', value: 'none', text: '明文（仅限无认证的系统 SMTP）' },
+              ]} onChange={(event, { value }) => setSmtpConfig((current) => ({ ...current, tls_mode: value }))} />
+              <Form.Input label='发送超时（秒）' type='number' min='1' max='120' value={smtpConfig.timeout_seconds} onChange={(event, { value }) => setSmtpConfig((current) => ({ ...current, timeout_seconds: Number(value) }))} />
+            </Form.Group>
+            <Form.Group widths='equal'>
+              <Form.Input label='发件人名称（可选）' value={smtpConfig.from_name} onChange={(event, { value }) => setSmtpConfig((current) => ({ ...current, from_name: value }))} />
+              <Form.Input label='发件邮箱（可选）' value={smtpConfig.from_address} placeholder='默认使用 SMTP 账号' onChange={(event, { value }) => setSmtpConfig((current) => ({ ...current, from_address: value }))} />
+            </Form.Group>
+            <Form.Checkbox label='同时发送 Markdown 渲染后的 HTML 正文' checked={smtpConfig.html} onChange={(event, { checked }) => setSmtpConfig((current) => ({ ...current, html: checked }))} />
           </>
         );
       case 'test':
@@ -1009,7 +1090,7 @@ const EditChannel = () => {
             }}
           />
           {renderChannelForm()}
-          <Button disabled={type === 'email'} onClick={submit}>
+          <Button onClick={submit}>
             提交
           </Button>
         </Form>
